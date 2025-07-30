@@ -1,3 +1,8 @@
+
+# https://www.kaggle.com/code/amansherjadakhan/fine-tuning-distilbert-for-question-answering
+# https://huggingface.co/datasets/vincentkoc/hotpot_qa_archive
+
+
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -83,6 +88,12 @@ def preprocess(examples):
 
     # get the span of the answer
     for i, (answer, context, offsets) in enumerate(zip(answers, context, inputs["offset_mapping"])):
+        # Handle None answers
+        if answer is None or answer.strip() == "":
+            start_positions.append(0)
+            end_positions.append(0)
+            continue
+            
         answer = answer.strip().lower()
         context_lower = context.lower()
 
@@ -118,4 +129,25 @@ def preprocess(examples):
 
 
 
+'''
+Use the preprocess function on the data
+'''
 
+tokenized_datasets = {}
+
+# process each split
+for split in ['train', 'validation', 'test']:
+    print(f"Processing {split}...")
+    tokenized_datasets[split] = dataset[split].map(
+        preprocess,
+        batched=True,
+        # batch_size=?,         # not sure what batch size we to use
+        remove_columns=dataset[split].column_names
+    )
+
+# save to tokenized_hotpotqa_fullwiki dir and make it if it does not exist
+save_dir = "./tokenized_hotpotqa_fullwiki"
+os.makedirs(save_dir, exist_ok=True)
+
+for split in tokenized_datasets:
+    tokenized_datasets[split].save_to_disk(os.path.join(save_dir, split))
