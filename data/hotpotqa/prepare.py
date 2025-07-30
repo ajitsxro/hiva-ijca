@@ -131,13 +131,16 @@ def preprocess(examples):
 
 '''
 Use the preprocess function on the data
+3 splits [train, validation, test]
+this makes a directory, /tokenized_hotpotqa_fullwiki
+in this directory we have 3 folders for each split
+data is stored as a .arrow file
 '''
 
 tokenized_datasets = {}
 
-# process each split
+# process each split 
 for split in ['train', 'validation', 'test']:
-    print(f"Processing {split}...")
     tokenized_datasets[split] = dataset[split].map(
         preprocess,
         batched=True,
