@@ -1,35 +1,36 @@
-from datasets import load_dataset
-
-dataset = load_dataset("hotpot_qa", "fullwiki")
-
-from transformers import AutoTokenizer
-
-tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
-
-def preprocess(example):
-    return tokenizer(
-        example["question"],
-        example["context"],
-        truncation="only_second",
-        max_length=512,
-        stride=128,
-        return_overflowing_tokens=True,
-        return_offsets_mapping=True,
-        padding="max_length"
-    )
-
-tokenized_train = dataset["train"].map(preprocess, batched=True)
-tokenized_val = dataset["validation"].map(preprocess, batched=True)
-
-from transformers import AutoModelForQuestionAnswering
-
-model = AutoModelForQuestionAnswering.from_pretrained("distilbert-base-uncased")
-
 from transformers import TrainingArguments, Trainer
+from transformers import AutoModelForQuestionAnswering, AutoTokenizer
+from datasets import load_from_disk, DatasetDict
 
+
+train_dataset = load_from_disk(
+    "data/hotpotqa/tokenized_hotpotqa_fullwiki/train")
+validation_dataset = load_from_disk(
+    "data/hotpotqa/tokenized_hotpotqa_fullwiki/validation")
+test_dataset = load_from_disk(
+    "data/hotpotqa/tokenized_hotpotqa_fullwiki/test")
+
+dataset = DatasetDict({
+    "train": train_dataset,
+    "validation": validation_dataset,
+    "test": test_dataset
+})
+
+
+tokenized_train = dataset["train"]
+tokenized_val = dataset["validation"]
+tokenized_test = dataset["test"]
+print("Data Loaded Correctly.")
+
+
+model = AutoModelForQuestionAnswering.from_pretrained(
+    "distilbert-base-uncased")
+print("Model Loaded Correctly")
+tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+print("Tokenizer Loaded Correctly.")
 args = TrainingArguments(
     output_dir="./checkpoints",
-    evaluation_strategy="epoch",
+    eval_strategy="epoch",
     learning_rate=2e-5,
     per_device_train_batch_size=16,
     per_device_eval_batch_size=16,
