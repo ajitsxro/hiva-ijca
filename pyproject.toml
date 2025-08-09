@@ -9,7 +9,7 @@ dependencies = [
     "transformers>=4.40.0",
     "datasets>=2.19.0",
     "evaluate",
-    "torch",
+    "torch>=2.8.0",
     "accelerate",
     "numpy>=2.0.2",
 ]
