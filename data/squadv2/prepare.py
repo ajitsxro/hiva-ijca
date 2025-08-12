@@ -42,7 +42,6 @@ dataset = DatasetDict({
 
 
 
-
 def preprocess(examples):
     questions = [q.strip() for q in examples["question"]]
     contexts = [c.strip() for c in examples["context"]]
@@ -51,8 +50,9 @@ def preprocess(examples):
     inputs = tokenizer(
         questions,
         contexts,
-        max_length=512,
-        truncation="only_second"
+        max_length=256,
+        truncation="only_second",
+        stride=128,
         return_offsets_mapping=True,
         padding="max_length"
     )
@@ -63,9 +63,15 @@ def preprocess(examples):
 
     for i, offset in enumerate(inputs["offset_mapping"]):
         answer = examples["answers"][i]
+        
+        # Handle unanswerable questions (empty answer lists in SQuAD v2)
+        if len(answer["answer_start"]) == 0:
+            start_positions.append(0)
+            end_positions.append(0)
+            continue
+            
         start_char = answer["answer_start"][0]
         end_char = start_char + len(answer["text"][0])
-
 
         token_start_idx = token_end_idx = 0
         for idx, (start, end) in enumerate(offset):
@@ -107,8 +113,8 @@ for split in ['train', 'validation', 'test']:
     )
 
 # save to tokenized_hotpotqa_fullwiki dir and make it if it does not exist
-save_dir = "./tokenzied_squadv2"
-os.makesirs(save_dir, exist_ok=True)
+save_dir = "./tokenized_squadv2"
+os.makedirs(save_dir, exist_ok=True)
 
 for split in tokenized_datasets:
     tokenized_datasets[split].save_to_disk(os.path.join(save_dir, split))
