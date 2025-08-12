@@ -1,2 +1,0 @@
-## Hotpot QA dataset
-
