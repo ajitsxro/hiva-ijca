@@ -1,14 +1,14 @@
 from transformers import TrainingArguments, Trainer
-from transformers import AutoModelForQuestionAnswering, AutoTokenizer
+from transformers import DistilBertForQuestionAnswering, DistilBertTokenizerFast
 from datasets import load_from_disk, DatasetDict
 
 
 train_dataset = load_from_disk(
-    "data/hotpotqa/tokenized_hotpotqa_fullwiki/train")
+    "data/squadv2/tokenized_squadv2/train")
 validation_dataset = load_from_disk(
-    "data/hotpotqa/tokenized_hotpotqa_fullwiki/validation")
+    "data/squadv2/tokenized_squadv2/validation")
 test_dataset = load_from_disk(
-    "data/hotpotqa/tokenized_hotpotqa_fullwiki/test")
+    "data/squadv2/tokenized_squadv2/test")
 
 dataset = DatasetDict({
     "train": train_dataset,
@@ -23,10 +23,10 @@ tokenized_test = dataset["test"]
 print("Data Loaded Correctly.")
 
 
-model = AutoModelForQuestionAnswering.from_pretrained(
+model = DistilBertForQuestionAnswering.from_pretrained(
     "distilbert-base-uncased")
 print("Model Loaded Correctly")
-tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
 print("Tokenizer Loaded Correctly.")
 args = TrainingArguments(
     output_dir="./checkpoints",
