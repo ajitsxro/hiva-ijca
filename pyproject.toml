@@ -7,7 +7,7 @@ requires-python = ">=3.9"
 
 dependencies = [
     "transformers>=4.40.0",
-    "datasets>=2.19.0",
+    "datasets<2.16",
     "evaluate",
     "torch>=2.8.0",
     "accelerate",
