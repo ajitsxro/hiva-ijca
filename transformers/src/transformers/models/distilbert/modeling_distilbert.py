@@ -23,6 +23,7 @@ from typing import Optional, Union
 
 import numpy as np
 import torch
+from .club import CLUB
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
@@ -968,7 +969,7 @@ def forward(
 class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)
-
+        self.club = CLUB(config.dim)
         self.distilbert = DistilBertModel(config)
         self.qa_outputs = nn.Linear(config.dim, config.num_labels)
         if config.num_labels != 2:
@@ -1014,7 +1015,6 @@ def forward(
 ) -> Union[tuple[torch.Tensor, ...], QuestionAnsweringModelOutput]:
     return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-    # Force return_dict=False to extract residual_diff
     distilbert_output = self.distilbert(
         input_ids=input_ids,
         attention_mask=attention_mask,
@@ -1022,7 +1022,7 @@ def forward(
         inputs_embeds=inputs_embeds,
         output_attentions=output_attentions,
         output_hidden_states=output_hidden_states,
-        return_dict=False,
+        return_dict=False,  # force tuple output to unpack residuals
     )
     hidden_states, residual_diff = distilbert_output[:2]
 
@@ -1046,7 +1046,17 @@ def forward(
         loss_fct = nn.CrossEntropyLoss(ignore_index=ignored_index)
         start_loss = loss_fct(start_logits, start_positions)
         end_loss = loss_fct(end_logits, end_positions)
-        total_loss = (start_loss + end_loss) / 2
+        task_loss = (start_loss + end_loss) / 2
+
+        # === CLUB Mutual Information Loss on Residuals ===
+        lambda_coeff = 0.1  # Tune this as needed
+        if residual_diff is not None and len(residual_diff) > 1:
+            x = torch.stack(residual_diff[:-1], dim=1).mean(dim=2)  # (bs, layers-1, dim)
+            y = torch.stack(residual_diff[1:], dim=1).mean(dim=2)   # (bs, layers-1, dim)
+            mi_loss = self.club(x, y)  # Make sure self.club is initialized in __init__
+            total_loss = (1 - lambda_coeff) * task_loss + lambda_coeff * mi_loss
+        else:
+            total_loss = task_loss
 
     if not return_dict:
         output = (start_logits, end_logits, residual_diff) + distilbert_output[2:]
