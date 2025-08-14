@@ -1025,6 +1025,8 @@ def forward(
         return_dict=False,  # force tuple output to unpack residuals
     )
     hidden_states, residual_diff = distilbert_output[:2]
+    print(residual_diff)
+    print(residual_diff.shape)
 
     hidden_states = self.dropout(hidden_states)
     logits = self.qa_outputs(hidden_states)
