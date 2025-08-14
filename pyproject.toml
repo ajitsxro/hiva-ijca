@@ -12,4 +12,5 @@ dependencies = [
     "torch>=2.8.0",
     "accelerate",
     "numpy>=2.0.2",
+    "tqdm>=4.67.1",
 ]
