@@ -1,6 +1,21 @@
-from transformers import TrainingArguments, Trainer
+from transformers import TrainingArguments, Trainer, TrainerCallback
 from transformers import DistilBertForQuestionAnswering, DistilBertTokenizerFast
 from datasets import load_from_disk, DatasetDict
+import math
+
+
+class PerplexityCallback(TrainerCallback):
+    """A callback to compute and log perplexity after evaluation."""
+    
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
+        if metrics and "eval_loss" in metrics:
+            try:
+                perplexity = math.exp(metrics["eval_loss"])
+                metrics["eval_perplexity"] = perplexity
+                print(f"Perplexity: {perplexity:.4f}")
+            except OverflowError:
+                metrics["eval_perplexity"] = float("inf")
+                print("Perplexity: inf")
 
 
 train_dataset = load_from_disk(
@@ -41,6 +56,9 @@ args = TrainingArguments(
     logging_steps=20,
     save_strategy="steps",
     save_steps=100,
+    load_best_model_at_end=True,
+    metric_for_best_model="eval_perplexity",
+    greater_is_better=False,
 )
 
 trainer = Trainer(
@@ -48,7 +66,8 @@ trainer = Trainer(
     args=args,
     train_dataset=tokenized_train,
     eval_dataset=tokenized_val,
-    tokenizer=tokenizer
+    tokenizer=tokenizer, 
+    callbacks=[PerplexityCallback()]
 )
 
 trainer.train()
