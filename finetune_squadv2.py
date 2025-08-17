@@ -30,14 +30,17 @@ tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
 print("Tokenizer Loaded Correctly.")
 args = TrainingArguments(
     output_dir="./outputs/finetuning-baseline",
-    eval_strategy="epoch",
+    eval_strategy="steps",
+    eval_steps=100,
     learning_rate=2e-5,
     per_device_train_batch_size=16,
     per_device_eval_batch_size=16,
     num_train_epochs=3,
     weight_decay=0.01,
     logging_dir="./logs",
-    save_strategy="epoch"
+    logging_steps=20,
+    save_strategy="steps",
+    save_steps=100,
 )
 
 trainer = Trainer(
