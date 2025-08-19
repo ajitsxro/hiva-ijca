@@ -524,6 +524,10 @@ def forward(
     hidden_state = x
     residuals = []  # <-- NEW: Store layer-wise residual deltas
 
+    all_residual_diffs = []
+    prev_h = h  # initial hidden state before first layer
+
+
     for i, layer_module in enumerate(self.layer):
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_state,)
@@ -536,6 +540,13 @@ def forward(
             output_attentions,
         )
         hidden_state = layer_outputs[-1]
+
+        if i > 0:  # skip first layer since it has no previous hidden state
+            residual_diff = h - prev_h
+            all_residual_diffs.append(residual_diff)
+
+        prev_h = h  # store for next iteration
+
 
         residuals.append(hidden_state - prev_hidden)  # <-- NEW: R_i = H_i - H_{i-1}
 
@@ -555,11 +566,17 @@ def forward(
     if not return_dict:
         return tuple(v for v in [hidden_state, all_hidden_states, all_attentions] if v is not None)
 
-    return BaseModelOutput(
-        last_hidden_state=hidden_state,
-        hidden_states=all_hidden_states,
-        attentions=all_attentions
-    )
+   outputs = BaseModelOutput(
+    last_hidden_state=h,
+    hidden_states=all_hidden_states if output_hidden_states else None,
+    attentions=all_attentions if output_attentions else None,
+)
+
+# Add residual diffs manually as a new dict-like key
+outputs["residual_diffs"] = all_residual_diffs if output_hidden_states else None
+
+return outputs
+
 
 
 # INTERFACE FOR ENCODER AND TASK SPECIFIC MODEL #
