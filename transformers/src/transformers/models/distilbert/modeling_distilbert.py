@@ -989,7 +989,8 @@ def forward(
 class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
     def __init__(self, config: PretrainedConfig):
         super().__init__(config)
-        self.club = CLUB(config.dim)
+        #Redundant
+        # self.club = CLUB(config.dim)
         self.distilbert = DistilBertModel(config)
         self.qa_outputs = nn.Linear(config.dim, config.num_labels)
                 # === CLUB Mutual Information Regularizer ===
@@ -1076,6 +1077,7 @@ def forward(
         task_loss = (start_loss + end_loss) / 2
 
             # === CLUB MI Regularization ===
+    #Is this the I(Hi, Hi+1)?
     mi_loss = 0.0
     if output_hidden_states and "residual_diffs" in outputs and outputs["residual_diffs"] is not None:
         residuals = outputs["residual_diffs"]
@@ -1085,6 +1087,7 @@ def forward(
         mi_loss = mi_loss / (len(residuals) - 1)
 
     # Combine QA loss with MI regularization
+    #Hiva: what is qa_loss
     loss = qa_loss + self.lambda_val * mi_loss
 else:
     # In inference mode, just use QA loss
