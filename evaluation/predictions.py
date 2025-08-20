@@ -48,17 +48,20 @@ squad = evaluate.load('squad_v2')
 
 predictions = []
 references = []
+na_probs = {}
 
 for example in validation_split:
     result = pipeline(question=example["question"], context=example["context"])
-
+    no_answer_prob = 1 - result["score"]
+    
     pred = {
         "id": example["id"],
         "prediction_text": result["answer"] if result["score"] > 0.5 else "",
-        "no_answer_probability": 1 - result["score"] if result["score"] <= 0.5 else 0
+        "no_answer_probability": no_answer_prob
     }
 
     predictions.append(pred)
+    na_probs[example["id"]] = no_answer_prob
 
     ref = {
         "id": example["id"],
@@ -72,8 +75,8 @@ print(f"F1 score: {results['f1']:.4f}")
 print(f"Exact match: {results['exact']:.4f}")
 
 predictions_dict = {pred["id"]: pred["prediction_text"] for pred in predictions}
-
 with open('predictions.json', 'w') as f:
     json.dump(predictions_dict, f, indent=2)
 
-
+with open('na_prob.json', 'w') as f:
+    json.dump(na_probs, f, indent=2)
