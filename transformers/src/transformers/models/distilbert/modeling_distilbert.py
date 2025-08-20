@@ -19,6 +19,7 @@ part from HuggingFace PyTorch version of Google AI Bert model (https://github.co
 """
 
 import math
+
 from typing import Optional, Union
 
 import numpy as np
@@ -53,6 +54,8 @@ from ...utils import (
     logging,
 )
 from .configuration_distilbert import DistilBertConfig
+from club import CLUBSample  # adjust import if CLUB repo uses a different name
+
 
 
 if is_flash_attn_available():
@@ -989,6 +992,11 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         self.club = CLUB(config.dim)
         self.distilbert = DistilBertModel(config)
         self.qa_outputs = nn.Linear(config.dim, config.num_labels)
+                # === CLUB Mutual Information Regularizer ===
+        self.lambda_val = 0.1  # weighting factor for MI loss
+        from club import CLUBSample  # make sure CLUB repo is cloned into your project
+        self.club = CLUBSample(config.hidden_size, config.hidden_size)
+
         if config.num_labels != 2:
             raise ValueError(f"config.num_labels should be 2, but it is {config.num_labels}")
 
@@ -1066,6 +1074,22 @@ def forward(
         start_loss = loss_fct(start_logits, start_positions)
         end_loss = loss_fct(end_logits, end_positions)
         task_loss = (start_loss + end_loss) / 2
+
+            # === CLUB MI Regularization ===
+    mi_loss = 0.0
+    if output_hidden_states and "residual_diffs" in outputs and outputs["residual_diffs"] is not None:
+        residuals = outputs["residual_diffs"]
+        for i in range(len(residuals) - 1):
+            # CLUB estimates MI between consecutive residual diffs
+            mi_loss += self.club(residuals[i], residuals[i+1]).mean()
+        mi_loss = mi_loss / (len(residuals) - 1)
+
+    # Combine QA loss with MI regularization
+    loss = qa_loss + self.lambda_val * mi_loss
+else:
+    # In inference mode, just use QA loss
+    loss = None
+
 
         # === CLUB Mutual Information Loss on Residuals ===
         lambda_coeff = 0.1  # Tune this as needed
