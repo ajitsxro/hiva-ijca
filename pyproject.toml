@@ -13,4 +13,5 @@ dependencies = [
     "accelerate",
     "numpy>=2.0.2",
     "tqdm>=4.67.1",
+    "matplotlib>=3.9.4",
 ]
