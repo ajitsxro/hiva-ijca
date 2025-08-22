@@ -13,4 +13,5 @@ dependencies = [
     "accelerate",
     "numpy>=2.0.2",
     "tqdm>=4.67.1",
+    "tensorboardx>=2.6.4",
 ]
