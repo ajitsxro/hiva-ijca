@@ -18,7 +18,7 @@ python ../transformers/examples/legacy/question-answering/run_squad_baseline.py 
     --predict_file dev-v2.0.json   \
     --per_gpu_train_batch_size 128   \
     --per_gpu_eval_batch_size 128   \
-    --learning_rate 2e-5   \
+    --learning_rate 3e-5   \
     --num_train_epochs 3   \
     --weight_decay 0.01   \
     --max_seq_length 384   \
