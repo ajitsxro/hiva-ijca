@@ -26,3 +26,16 @@ python --version
 pip list
 ```
 
+## Running the Baseline
+
+### DistilBert + SQuAD v2.0 Training Script
+
+To run the baseline DistilBERT fine-tuning on SQuAD v2.0:
+
+```bash
+# Navigate to the baseline directory
+cd baseline
+
+# Run the finetuning script
+source run_squad.py
+```

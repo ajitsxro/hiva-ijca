@@ -2,7 +2,7 @@
 # export DATA_DIR=./data/squadv2
 # export MODEL_DIR=./models
 
-python transformers/examples/legacy/question-answering/run_squad_baseline.py  \
+python ../transformers/examples/legacy/question-answering/run_squad_baseline.py  \
     --model_type distilbert   \
     --model_name_or_path distilbert-base-uncased  \
     --output_dir ./outputs/finetuning-baseline \
