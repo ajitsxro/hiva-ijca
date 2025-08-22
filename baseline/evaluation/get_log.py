@@ -2,7 +2,7 @@ import tensorflow as tf
 import json
 from collections import defaultdict
 
-event_file = "Aug22_11-34-07_69d628c65bfc/events.out.tfevents.1755862447.69d628c65bfc"
+event_file = "../runs/Aug22_11-34-07_69d628c65bfc/events.out.tfevents.1755862447.69d628c65bfc"
 
 # Dictionary to hold metrics by step
 data = defaultdict(dict)
