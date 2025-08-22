@@ -232,7 +232,20 @@ def train(args, train_dataset, model, tokenizer):
                         for key, value in results.items():
                             tb_writer.add_scalar(f"eval_{key}", value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
-                    tb_writer.add_scalar("loss", (tr_loss - logging_loss) / args.logging_steps, global_step)
+
+                    # adding perplexity here
+                    current_loss = (tr_loss - logging_loss) / args.logging_steps
+                    tb_writer.add_scalar("loss", current_loss, global_step)
+                    
+                    # adding perplexity here
+                    try:
+                        perplexity = math.exp(current_loss)
+                        tb_writer.add_scalar("perplexity", perplexity, global_step)
+                        logger.info(f"Perplexity: {perplexity:.4f}")
+                    except OverflowError:
+                        tb_writer.add_scalar("perplexity", float('inf'), global_step)
+                        logger.info("Perplexity: inf")
+                    
                     logging_loss = tr_loss
 
                 # Save model checkpoint
