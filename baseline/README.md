@@ -37,27 +37,20 @@ To run the baseline DistilBERT fine-tuning on SQuAD v2.0:
 cd baseline
 
 # Run the finetuning script
-source run_squad.py
+source run_squad.sh
 ```
 
 ## Results
 
-After running our huggingfaces provided training script for SQuAD v2.0 with perplexity added, here are the results without 
+After running the training script, to evaluate the model:
 
 ```bash
-"exact": 59.37842162890592,
-"f1": 63.00454083996302,
-"total": 11873,
-"HasAns_exact": 59.733468286099864,
-"HasAns_f1": 66.99610549812418,
-"HasAns_total": 5928,
-"NoAns_exact": 59.02439024390244,
-"NoAns_f1": 59.02439024390244,
-"NoAns_total": 5945, "best_exact": 62.25890676324433,
-"best_exact_thresh": -2.2732505798339844,
-"best_f1": 64.80409815607187,
-"best_f1_thresh": -1.4037442207336426,
-"pr_exact_ap": 37.9350185172231,
-"pr_f1_ap": 46.061044924994974,
-"pr_oracle_ap": 73.83702512765699
+cd baseline
+
+# Run the evaluation script
+run_eval.sh
 ```
+
+Results are saved in the evaluation directory as:
+- best_thresh_results.json
+- tensorboard_log.json

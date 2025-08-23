@@ -1,8 +1,16 @@
 import tensorflow as tf
 import json
+import os
+import glob
 from collections import defaultdict
 
-event_file = "../runs/Aug22_11-34-07_69d628c65bfc/events.out.tfevents.1755862447.69d628c65bfc"
+
+runs_dir = "../runs"
+event_files = glob.glob(os.path.join(runs_dir, "**/events.out.tfevents.*"), recursive=True)
+if not event_files:
+    raise FileNotFoundError("No event files found in runs directory, run training script first")
+
+event_file = max(event_files, key=os.path.getmtime)
 
 # Dictionary to hold metrics by step
 data = defaultdict(dict)
