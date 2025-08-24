@@ -25,19 +25,19 @@ train_dataset = load_from_disk(
     "data/squadv2/tokenized_squadv2/train")
 validation_dataset = load_from_disk(
     "data/squadv2/tokenized_squadv2/validation")
-test_dataset = load_from_disk(
-    "data/squadv2/tokenized_squadv2/test")
+# test_dataset = load_from_disk(
+#     "data/squadv2/tokenized_squadv2/test")
 
 dataset = DatasetDict({
     "train": train_dataset,
     "validation": validation_dataset,
-    "test": test_dataset
+    # "test": test_dataset
 })
 
 
 tokenized_train = dataset["train"]
 tokenized_val = dataset["validation"]
-tokenized_test = dataset["test"]
+# tokenized_test = dataset["test"]
 print("Data Loaded Correctly.")
 
 
