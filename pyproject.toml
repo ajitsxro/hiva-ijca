@@ -13,5 +13,7 @@ dependencies = [
     "accelerate",
     "numpy>=2.0.2",
     "tqdm>=4.67.1",
+    "tensorboardx>=2.6.4",
+    "tensorflow>=2.20.0",
     "matplotlib>=3.9.4",
 ]
