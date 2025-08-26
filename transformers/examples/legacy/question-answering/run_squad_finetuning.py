@@ -507,6 +507,13 @@ def main():
         help="The output directory where the model checkpoints and predictions will be written.",
     )
 
+    # added argument for selecting MITR version of distilbert
+    parser.add_argument(
+        "--use_mitr_model",
+        action="store_true",
+        help="Use the MITR modified DistilBERT model instead of the baseline",
+    )
+
     # Other parameters
     parser.add_argument(
         "--data_dir",
@@ -761,12 +768,35 @@ def main():
         cache_dir=args.cache_dir if args.cache_dir else None,
         use_fast=False,  # SquadDataset is not compatible with Fast tokenizers which have a smarter overflow handling
     )
-    model = AutoModelForQuestionAnswering.from_pretrained(
-        args.model_name_or_path,
-        from_tf=bool(".ckpt" in args.model_name_or_path),
-        config=config,
-        cache_dir=args.cache_dir if args.cache_dir else None,
-    )
+
+    # Load model - use MITR version if specified
+    if args.use_mitr_model and args.model_type == 'distilbert':
+        import sys
+        # Add the transformers src directory to the path
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        transformers_src_path = os.path.join(script_dir, '../../../src')
+        transformers_src_path = os.path.abspath(transformers_src_path)
+        if transformers_src_path not in sys.path:
+            sys.path.insert(0, transformers_src_path)
+        
+        # Import the MITR model from the transformers package
+        from transformers.models.distilbert.modeling_distilbert_mitr import DistilBertForQuestionAnswering
+        model = DistilBertForQuestionAnswering.from_pretrained(
+            args.model_name_or_path,
+            from_tf=bool(".ckpt" in args.model_name_or_path),
+            config=config,
+            cache_dir=args.cache_dir if args.cache_dir else None,
+        )
+        logger.info("Using MITR modified DistilBERT model")
+    else:
+        # default 
+        model = AutoModelForQuestionAnswering.from_pretrained(
+            args.model_name_or_path,
+            from_tf=bool(".ckpt" in args.model_name_or_path),
+            config=config,
+            cache_dir=args.cache_dir if args.cache_dir else None,
+        )
+        logger.info("Using baseline model")
 
     if args.local_rank == 0:
         # Make sure only the first process in distributed training will download model & vocab
@@ -807,7 +837,10 @@ def main():
         torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
 
         # Load a trained model and vocabulary that you have fine-tuned
-        model = AutoModelForQuestionAnswering.from_pretrained(args.output_dir)  # , force_download=True)
+        if args.use_mitr_model and args.model_type == 'distilbert':
+            model = DistilBertForQuestionAnswering.from_pretrained(args.output_dir)
+        else:
+            model = AutoModelForQuestionAnswering.from_pretrained(args.output_dir)  # , force_download=True)
 
         # SquadDataset is not compatible with Fast tokenizers which have a smarter overflow handling
         # So we use use_fast=False here for now until Fast-tokenizer-compatible-examples are out
@@ -835,7 +868,10 @@ def main():
         for checkpoint in checkpoints:
             # Reload the model
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
-            model = AutoModelForQuestionAnswering.from_pretrained(checkpoint)  # , force_download=True)
+            if args.use_mitr_model and args.model_type == 'distilbert':
+                model = DistilBertForQuestionAnswering.from_pretrained(checkpoint)
+            else:
+                model = AutoModelForQuestionAnswering.from_pretrained(checkpoint)  # , force_download=True)
             model.to(args.device)
 
             # Evaluate
