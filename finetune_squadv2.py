@@ -2,7 +2,17 @@ from transformers import TrainingArguments, Trainer, TrainerCallback
 from transformers import DistilBertForQuestionAnswering, DistilBertTokenizerFast
 from datasets import load_from_disk, DatasetDict
 import math
+import os
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  
+os.environ["OMP_NUM_THREADS"] = "1"             
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    
+
+import multiprocessing
+multiprocessing.set_start_method('spawn', force=True)
 
 # Adds perplexity
 
@@ -63,6 +73,7 @@ args = TrainingArguments(
     load_best_model_at_end=True,
     metric_for_best_model="eval_perplexity",
     greater_is_better=False,
+    dataloader_num_workers=0,
 )
 
 

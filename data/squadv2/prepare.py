@@ -14,20 +14,20 @@ tokenizer = DistilBertTokenizerFast.from_pretrained('distilbert-base-uncased')
 
 
 # Create test split from train data
-test_size = len(dataset['validation'])  # Use same size as validation (11873)
-train_dataset = dataset['train']
+# test_size = len(dataset['validation'])  # Use same size as validation (11873)
+# train_dataset = dataset['train']
 
-# Split the train dataset
-train_split = train_dataset.select(range(test_size, len(train_dataset)))
-test_split = train_dataset.select(range(test_size))
+# # Split the train dataset
+# train_split = train_dataset.select(range(test_size, len(train_dataset)))
+# test_split = train_dataset.select(range(test_size))
 
 # Update dataset with new splits
 from datasets import DatasetDict
 
 dataset = DatasetDict({
-    'train': train_split,
+    'train': dataset['train'],
     'validation': dataset['validation'],
-    'test': test_split
+    # 'test': test_split
 })
 
 
@@ -104,7 +104,7 @@ data is stored as a .arrow file
 tokenized_datasets = {}
 
 # process each split 
-for split in ['train', 'validation', 'test']:
+for split in ['train', 'validation']:
     tokenized_datasets[split] = dataset[split].map(
         preprocess,
         batched=True,
