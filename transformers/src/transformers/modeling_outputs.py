@@ -46,6 +46,7 @@ class BaseModelOutput(ModelOutput):
     last_hidden_state: Optional[torch.FloatTensor] = None
     hidden_states: Optional[tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[tuple[torch.FloatTensor, ...]] = None
+    residual_diff: Optional[tuple[torch.FloatTensor, ...]] = None
 
 
 @dataclass
@@ -1133,6 +1134,7 @@ class QuestionAnsweringModelOutput(ModelOutput):
     end_logits: Optional[torch.FloatTensor] = None
     hidden_states: Optional[tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[tuple[torch.FloatTensor, ...]] = None
+    residuals: Optional[tuple[torch.FloatTensor, ...]] = None
 
 
 @dataclass
