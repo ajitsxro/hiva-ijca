@@ -30,7 +30,7 @@ pip list
 
 ### DistilBert + SQuAD v2.0 Training Script
 
-To run the baseline DistilBERT fine-tuning on SQuAD v2.0:
+To run DistilBERT fine-tuning on SQuAD v2.0:
 
 ```bash
 # Navigate to the baseline directory
@@ -39,7 +39,7 @@ cd baseline
 # Run the finetuning script for baseline
 source run_squad.sh
 
-# To run the finetuning script on distilbert with out technique
+# To run the finetuning script on distilbert with MITR 
 USE_MITR_MODEL=1 source run_squad.sh
 ```
 
@@ -52,6 +52,9 @@ cd baseline
 
 # Run the evaluation script
 run_eval.sh
+
+# Run the evaluation script on MITR version
+USE_MITR_MODEL=1 source run_eval.sh     
 ```
 
 Results are saved in the evaluation directory as:
