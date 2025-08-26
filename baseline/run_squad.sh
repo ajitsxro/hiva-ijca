@@ -17,7 +17,7 @@ else
 fi
 
 # change batch size depending on gpu 
-python ../transformers/examples/legacy/question-answering/run_squad_baseline.py  \
+python ../transformers/examples/legacy/question-answering/run_squad_finetuning.py  \
     --model_type distilbert   \
     --model_name_or_path distilbert-base-uncased  \
     --output_dir "$OUTPUT_DIR" \
