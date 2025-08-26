@@ -36,8 +36,11 @@ To run the baseline DistilBERT fine-tuning on SQuAD v2.0:
 # Navigate to the baseline directory
 cd baseline
 
-# Run the finetuning script
+# Run the finetuning script for baseline
 source run_squad.sh
+
+# To run the finetuning script on distilbert with out technique
+USE_MITR_MODEL=1 source run_squad.sh
 ```
 
 ## Results
