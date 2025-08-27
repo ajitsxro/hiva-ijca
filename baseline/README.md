@@ -55,7 +55,7 @@ After running the training script, to evaluate the model:
 cd baseline
 
 # Run the evaluation script
-run_eval.sh
+source run_eval.sh
 
 # Run the evaluation script on MITR version
 USE_MITR_MODEL=1 source run_eval.sh     
