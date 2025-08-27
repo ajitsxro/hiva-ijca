@@ -1,7 +1,13 @@
 import json
+import sys
 from transformers.data.metrics.squad_metrics import squad_evaluate
 from transformers.data.processors.squad import SquadV2Processor
 
+# Get output directory from command line argument
+if len(sys.argv) > 1:
+    output_dir = sys.argv[1]
+else:
+    output_dir = "../outputs/distilbert-finetuning-baseline"
 
 processor = SquadV2Processor()
 examples = processor.get_dev_examples("../data/squadv2/", filename="dev-v2.0.json")
@@ -16,11 +22,11 @@ no_answer_qids = [qas_id for qas_id, has_answer in qid_to_has_answer.items() if 
 
 
 # load the predictions we generated earlier
-filename = "../outputs/distilbert-finetuning-baseline/predictions_.json"
+filename = f"{output_dir}/predictions_.json"
 preds = json.load(open(filename, 'rb'))
 
 # load the null score differences we generated earlier
-filename = "../outputs/distilbert-finetuning-baseline/null_odds_.json"
+filename = f"{output_dir}/null_odds_.json"
 null_odds = json.load(open(filename, 'rb'))
 
 

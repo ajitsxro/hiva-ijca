@@ -2,11 +2,25 @@
 # export DATA_DIR=./data/squadv2
 # export MODEL_DIR=./models
 
+# Set USE_MITR_MODEL=1 to use MITR modified DistilBERT, otherwise uses baseline
+USE_MITR_MODEL=${USE_MITR_MODEL:-0}
+
+# Determine output directory and MITR flag based on USE_MITR_MODEL
+if [ "$USE_MITR_MODEL" = "1" ]; then
+    OUTPUT_DIR="./outputs/distilbert-finetuning-mitr"
+    MITR_FLAG="--use_mitr_model"
+    echo "Using MITR modified DistilBERT model"
+else
+    OUTPUT_DIR="./outputs/distilbert-finetuning-baseline"
+    MITR_FLAG=""
+    echo "Using baseline DistilBERT model"
+fi
+
 # change batch size depending on gpu 
-python ../transformers/examples/legacy/question-answering/run_squad_baseline.py  \
+python ../transformers/examples/legacy/question-answering/run_squad_finetuning.py  \
     --model_type distilbert   \
     --model_name_or_path distilbert-base-uncased  \
-    --output_dir ./outputs/distilbert-finetuning-baseline \
+    --output_dir "$OUTPUT_DIR" \
     --data_dir data/squadv2   \
     --overwrite_output_dir \
     --overwrite_cache \
@@ -26,4 +40,5 @@ python ../transformers/examples/legacy/question-answering/run_squad_baseline.py 
     --threads 10   \
     --save_steps 100  \
     --logging_steps 100  \
-    --evaluate_during_training 
+    --evaluate_during_training \
+    $MITR_FLAG 
