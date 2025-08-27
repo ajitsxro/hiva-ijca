@@ -21,9 +21,13 @@ uv sync
 # Activate virtual environment
 source .venv/bin/activate
 
+# Install transformers package from director
+cd transformers
+uv pip install .
+
 # Verify installation
 python --version
-pip list
+uv pip list
 ```
 
 ## Running the Baseline
