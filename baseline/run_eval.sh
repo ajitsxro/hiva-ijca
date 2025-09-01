@@ -13,6 +13,6 @@ else
 fi
 
 cd evaluation
-python get_log.py
+python get_log.py $USE_MITR_MODEL
 python squadv2_eval.py "$OUTPUT_DIR"
 cd ..
