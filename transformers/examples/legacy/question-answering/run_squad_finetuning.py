@@ -336,7 +336,26 @@ def evaluate(args, model, tokenizer, prefix=""):
             eval_feature = features[feature_index.item()]
             unique_id = int(eval_feature.unique_id)
 
-            output = [to_list(output[i]) for output in outputs.to_tuple()]
+            # Extract outputs for this specific example (index i)
+            output_tuple = outputs.to_tuple()
+            output = []
+            for tensor in output_tuple:
+                if tensor is not None and len(tensor) > i:
+                    output.append(to_list(tensor[i]))
+                else:
+                    output.append(None)
+            
+            # Debug: print output structure (only for first example)
+            if i == 0:
+                print(f"Output length: {len(output)}")
+                for idx, item in enumerate(output):
+                    if item is not None:
+                        if isinstance(item, list) and len(item) > 0:
+                            print(f"Output[{idx}]: shape/length={len(item)}, type={type(item[0]) if item else 'empty'}")
+                        else:
+                            print(f"Output[{idx}]: {type(item)}, value={item}")
+                    else:
+                        print(f"Output[{idx}]: None")
 
             # Some models (XLNet, XLM) use 5 arguments for their predictions, while the other "simpler"
             # models only use two.
@@ -357,7 +376,14 @@ def evaluate(args, model, tokenizer, prefix=""):
                 )
 
             else:
-                start_logits, end_logits = output
+                # For models like DistilBERT that may return more than 2 values but less than 5
+                # Check if first element is a scalar loss (single value in list)
+                if len(output) > 2 and isinstance(output[0], list) and len(output[0]) == 1:  # scalar loss
+                    start_logits = output[1]
+                    end_logits = output[2]
+                else:
+                    start_logits = output[0]
+                    end_logits = output[1]
                 result = SquadResult(unique_id, start_logits, end_logits)
 
             all_results.append(result)
