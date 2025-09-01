@@ -75,10 +75,10 @@ def to_list(tensor):
 def train(args, train_dataset, model, tokenizer):
     """Train the model"""
     if args.local_rank in [-1, 0]:
-        # Create custom log directory name based on mode and date
-        current_date = datetime.now().strftime("%m%d")
+        # Create custom log directory name based on mode and date/time
+        current_datetime = datetime.now().strftime("%m%d_%H%M")
         mode = "mitr" if args.use_mitr_model else "baseline"
-        log_dir = f"runs/squadv2_{mode}_{current_date}"
+        log_dir = f"runs/squadv2_{mode}_{current_datetime}"
         tb_writer = SummaryWriter(log_dir=log_dir)
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
@@ -794,14 +794,25 @@ def main():
         )
         logger.info("Using MITR modified DistilBERT model")
     else:
-        # default 
-        model = AutoModelForQuestionAnswering.from_pretrained(
-            args.model_name_or_path,
-            from_tf=bool(".ckpt" in args.model_name_or_path),
-            config=config,
-            cache_dir=args.cache_dir if args.cache_dir else None,
-        )
-        logger.info("Using baseline model")
+        # Explicitly use the original DistilBERT model for baseline
+        if args.model_type == 'distilbert':
+            from transformers.models.distilbert.modeling_distilbert import DistilBertForQuestionAnswering
+            model = DistilBertForQuestionAnswering.from_pretrained(
+                args.model_name_or_path,
+                from_tf=bool(".ckpt" in args.model_name_or_path),
+                config=config,
+                cache_dir=args.cache_dir if args.cache_dir else None,
+            )
+            logger.info("Using baseline DistilBERT model")
+        else:
+            # For other model types, use AutoModel
+            model = AutoModelForQuestionAnswering.from_pretrained(
+                args.model_name_or_path,
+                from_tf=bool(".ckpt" in args.model_name_or_path),
+                config=config,
+                cache_dir=args.cache_dir if args.cache_dir else None,
+            )
+            logger.info("Using baseline model")
 
     if args.local_rank == 0:
         # Make sure only the first process in distributed training will download model & vocab
@@ -843,6 +854,10 @@ def main():
 
         # Load a trained model and vocabulary that you have fine-tuned
         if args.use_mitr_model and args.model_type == 'distilbert':
+            from transformers.models.distilbert.modeling_distilbert_mitr import DistilBertForQuestionAnswering
+            model = DistilBertForQuestionAnswering.from_pretrained(args.output_dir)
+        elif args.model_type == 'distilbert':
+            from transformers.models.distilbert.modeling_distilbert import DistilBertForQuestionAnswering
             model = DistilBertForQuestionAnswering.from_pretrained(args.output_dir)
         else:
             model = AutoModelForQuestionAnswering.from_pretrained(args.output_dir)  # , force_download=True)
@@ -874,6 +889,10 @@ def main():
             # Reload the model
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
             if args.use_mitr_model and args.model_type == 'distilbert':
+                from transformers.models.distilbert.modeling_distilbert_mitr import DistilBertForQuestionAnswering
+                model = DistilBertForQuestionAnswering.from_pretrained(checkpoint)
+            elif args.model_type == 'distilbert':
+                from transformers.models.distilbert.modeling_distilbert import DistilBertForQuestionAnswering
                 model = DistilBertForQuestionAnswering.from_pretrained(checkpoint)
             else:
                 model = AutoModelForQuestionAnswering.from_pretrained(checkpoint)  # , force_download=True)
