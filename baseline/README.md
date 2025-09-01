@@ -61,6 +61,6 @@ source run_eval.sh
 USE_MITR_MODEL=1 source run_eval.sh     
 ```
 
-Results are saved in the evaluation directory as:
+Results are saved in the directory as the run being evaluated as:
 - best_thresh_results.json
 - tensorboard_log.json
