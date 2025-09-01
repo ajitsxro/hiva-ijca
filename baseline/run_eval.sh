@@ -14,5 +14,5 @@ fi
 
 cd evaluation
 python get_log.py $USE_MITR_MODEL
-python squadv2_eval.py "$OUTPUT_DIR"
+python squadv2_eval.py "$OUTPUT_DIR" $USE_MITR_MODEL
 cd ..

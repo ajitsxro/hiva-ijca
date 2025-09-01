@@ -21,7 +21,9 @@ if not event_files:
 
 # Select the most recent event file for the specified model type
 event_file = max(event_files, key=os.path.getmtime)
+event_dir = os.path.dirname(event_file)
 print(f"Using event file: {event_file}")
+print(f"Output directory: {event_dir}")
 
 # Dictionary to hold metrics by step
 data = defaultdict(dict)
@@ -35,5 +37,9 @@ steps_data = [
     {"step": step, **metrics} for step, metrics in sorted(data.items())
 ]
 
-with open("tensorboard_log.json", "w") as f:
+# Save tensorboard log in the same directory as the event file
+output_file = os.path.join(event_dir, "tensorboard_log.json")
+with open(output_file, "w") as f:
     json.dump(steps_data, f, indent=4)
+
+print(f"Saved tensorboard log to: {output_file}")
