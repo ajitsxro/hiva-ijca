@@ -24,6 +24,7 @@ source .venv/bin/activate
 # Install transformers package from director
 cd transformers
 uv pip install .
+cd ..
 
 # Verify installation
 python --version
