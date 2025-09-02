@@ -357,16 +357,16 @@ def evaluate(args, model, tokenizer, prefix=""):
                     output.append(None)
             
             # Debug: print output structure (only for first example)
-            if i == 0:
-                print(f"Output length: {len(output)}")
-                for idx, item in enumerate(output):
-                    if item is not None:
-                        if isinstance(item, list) and len(item) > 0:
-                            print(f"Output[{idx}]: shape/length={len(item)}, type={type(item[0]) if item else 'empty'}")
-                        else:
-                            print(f"Output[{idx}]: {type(item)}, value={item}")
-                    else:
-                        print(f"Output[{idx}]: None")
+            # if i == 0:
+            #     # print(f"Output length: {len(output)}")
+            #     for idx, item in enumerate(output):
+            #         if item is not None:
+            #             if isinstance(item, list) and len(item) > 0:
+            #                 print(f"Output[{idx}]: shape/length={len(item)}, type={type(item[0]) if item else 'empty'}")
+            #             else:
+            #                 print(f"Output[{idx}]: {type(item)}, value={item}")
+            #         else:
+            #             print(f"Output[{idx}]: None")
 
             # Some models (XLNet, XLM) use 5 arguments for their predictions, while the other "simpler"
             # models only use two.
