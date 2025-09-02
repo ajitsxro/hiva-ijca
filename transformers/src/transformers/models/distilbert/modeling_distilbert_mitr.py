@@ -570,6 +570,7 @@ class Transformer(nn.Module):
             all_hidden_states = all_hidden_states + (hidden_state,)
             self.residuals = residuals  # <-- NEW: Save residuals as class attribute
     
+        print("Return_dict:", return_dict)
         if not return_dict:
             return tuple(v for v in [hidden_state, all_hidden_states, all_attentions] if v is not None)
     
@@ -582,7 +583,8 @@ class Transformer(nn.Module):
         )
         # print('after output')
 
-        print('outputs:', outputs)
+        # print('outputs:', outputs)
+        print("residual_diffs 1:", all_residual_diffs[0].shape)
         
         # Add residual diffs manually as a new dict-like key
         # outputs["residual_diffs"] = all_residual_diffs if output_hidden_states else None
@@ -817,7 +819,7 @@ class DistilBertForMaskedLM(DistilBertPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings: nn.Module):
         self.vocab_projector = new_embeddings
-    
+
     @auto_docstring
     def forward(
         self,
@@ -833,10 +835,10 @@ class DistilBertForMaskedLM(DistilBertPreTrainedModel):
         r"""
         input_ids (`torch.LongTensor` of shape `(batch_size, num_choices)`):
             Indices of input sequence tokens in the vocabulary.
-    
+
             Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for details.
-    
+
             [What are input IDs?](../glossary#input-ids)
         inputs_embeds (`torch.FloatTensor` of shape `(batch_size, num_choices, hidden_size)`, *optional*):
             Optionally, instead of passing `input_ids` you can choose to directly pass an embedded representation. This
@@ -848,8 +850,7 @@ class DistilBertForMaskedLM(DistilBertPreTrainedModel):
             loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-    
-        # Force return_dict=False so we can unpack residual_diff
+
         dlbrt_output = self.distilbert(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -857,29 +858,27 @@ class DistilBertForMaskedLM(DistilBertPreTrainedModel):
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=False,
+            return_dict=return_dict,
         )
-        hidden_states, residual_diff = dlbrt_output  # Unpack tuple
-    
+        hidden_states = dlbrt_output[0]  # (bs, seq_length, dim)
         prediction_logits = self.vocab_transform(hidden_states)  # (bs, seq_length, dim)
         prediction_logits = self.activation(prediction_logits)  # (bs, seq_length, dim)
         prediction_logits = self.vocab_layer_norm(prediction_logits)  # (bs, seq_length, dim)
         prediction_logits = self.vocab_projector(prediction_logits)  # (bs, seq_length, vocab_size)
-    
+
         mlm_loss = None
         if labels is not None:
             mlm_loss = self.mlm_loss_fct(prediction_logits.view(-1, prediction_logits.size(-1)), labels.view(-1))
-    
+
         if not return_dict:
-            output = (prediction_logits, residual_diff)
+            output = (prediction_logits,) + dlbrt_output[1:]
             return ((mlm_loss,) + output) if mlm_loss is not None else output
-    
+
         return MaskedLMOutput(
             loss=mlm_loss,
             logits=prediction_logits,
-            hidden_states=None,
-            attentions=None,
-            residual_diff=residual_diff,  # Add residual_diff to output
+            hidden_states=dlbrt_output.hidden_states,
+            attentions=dlbrt_output.attentions,
         )
 
 
@@ -922,7 +921,7 @@ class DistilBertForSequenceClassification(DistilBertPreTrainedModel):
                 the size will remove vectors from the end.
         """
         self.distilbert.resize_position_embeddings(new_num_position_embeddings)
-    
+
     @auto_docstring
     def forward(
         self,
@@ -942,8 +941,7 @@ class DistilBertForSequenceClassification(DistilBertPreTrainedModel):
             `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-    
-        # CHANGED: unpack output from distilbert (modified to return residual_diff)
+
         distilbert_output = self.distilbert(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -951,16 +949,15 @@ class DistilBertForSequenceClassification(DistilBertPreTrainedModel):
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=False,  # force tuple to extract residual
+            return_dict=return_dict,
         )
-        hidden_state, residual_diff = distilbert_output  # <- unpack residual
-    
+        hidden_state = distilbert_output[0]  # (bs, seq_len, dim)
         pooled_output = hidden_state[:, 0]  # (bs, dim)
         pooled_output = self.pre_classifier(pooled_output)  # (bs, dim)
         pooled_output = nn.ReLU()(pooled_output)  # (bs, dim)
         pooled_output = self.dropout(pooled_output)  # (bs, dim)
         logits = self.classifier(pooled_output)  # (bs, num_labels)
-    
+
         loss = None
         if labels is not None:
             if self.config.problem_type is None:
@@ -970,7 +967,7 @@ class DistilBertForSequenceClassification(DistilBertPreTrainedModel):
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"
-    
+
             if self.config.problem_type == "regression":
                 loss_fct = MSELoss()
                 if self.num_labels == 1:
@@ -983,18 +980,17 @@ class DistilBertForSequenceClassification(DistilBertPreTrainedModel):
             elif self.config.problem_type == "multi_label_classification":
                 loss_fct = BCEWithLogitsLoss()
                 loss = loss_fct(logits, labels)
-    
+
         if not return_dict:
-            output = (logits, residual_diff) + distilbert_output[1:]
+            output = (logits,) + distilbert_output[1:]
             return ((loss,) + output) if loss is not None else output
-    
-        # CHANGED: manually wrap SequenceClassifierOutput since return_dict=True isn't supported with residual_diff
+
         return SequenceClassifierOutput(
             loss=loss,
             logits=logits,
-            hidden_states=None,  # not available in tuple mode
-            attentions=None,     # not available in tuple mode
-        ), residual_diff  # <- return residual separately
+            hidden_states=distilbert_output.hidden_states,
+            attentions=distilbert_output.attentions,
+        )
 
 
 @auto_docstring
@@ -1066,16 +1062,18 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         # print('output length:', len(distilbert_output))
 
         # print(distilbert_output.shape)
-        hidden_states, residual_diff= distilbert_output[:2]
+        # hidden_states, residual_diff= distilbert_output[:2]
+        hidden_states = distilbert_output[0]
 
-        # if distilbert_output[3] is not None:
-        #     residual_diff = distilbert_output[3]
-        # else:
-        #     residual_diff = None
+        if distilbert_output.residual_diff is not None:
+            residual_diff = distilbert_output.residual_diff
+        else:
+            residual_diff = None
 
 
-        # print(residual_diff)
-        # print(residual_diff.shape)
+        # print("residual_diff:", residual_diff)
+        print("residual shape:", len(residual_diff))
+        print("residualdif0:", residual_diff[0].shape)
     
         hidden_states = self.dropout(hidden_states)
         logits = self.qa_outputs(hidden_states)
@@ -1111,6 +1109,7 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
                 for i in range(len(residuals) - 1):
                     # CLUB estimates MI between consecutive residual diffs
                     mi_loss += self.club(residuals[i], residuals[i+1]).mean()
+                    print("mi mean:", mi_loss)
                 mi_loss = mi_loss / (len(residuals) - 1)
 
                 print("mi_loss:", mi_loss)
@@ -1129,10 +1128,12 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
                 x = torch.stack(residual_diff[:-1], dim=1).mean(dim=2)  # (bs, layers-1, dim)
                 y = torch.stack(residual_diff[1:], dim=1).mean(dim=2)   # (bs, layers-1, dim)
                 mi_loss = self.club(x, y)  # Make sure self.club is initialized in __init__
+                print("mi_loss2:", mi_loss)
                 total_loss = (1 - lambda_coeff) * task_loss + lambda_coeff * mi_loss
             else:
                 total_loss = task_loss
             print("total_loss", total_loss)
+
         if not return_dict:
             output = (start_logits, end_logits, residual_diff) + distilbert_output[2:]
             return ((total_loss,) + output) if total_loss is not None else output
@@ -1199,37 +1200,37 @@ class DistilBertForTokenClassification(DistilBertPreTrainedModel):
             Labels for computing the token classification loss. Indices should be in `[0, ..., config.num_labels - 1]`.
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-    
-        # CHANGED: set return_dict=False to get residual_diff from tuple
+
         outputs = self.distilbert(
-            input_ids=input_ids,
+            input_ids,
             attention_mask=attention_mask,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=False,
+            return_dict=return_dict,
         )
-    
-        sequence_output, residual_diff = outputs  # CHANGED: unpack residual
+
+        sequence_output = outputs[0]
+
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
-    
+
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-    
+
         if not return_dict:
-            output = (logits, residual_diff) + outputs[2:]
+            output = (logits,) + outputs[1:]
             return ((loss,) + output) if loss is not None else output
-    
+
         return TokenClassifierOutput(
             loss=loss,
             logits=logits,
-            hidden_states=None,   # CHANGED: set to None since we're using tuple mode
-            attentions=None,      # CHANGED: set to None
-        ), residual_diff  # CHANGED: return residual separately
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
 
 
 @auto_docstring
@@ -1280,21 +1281,44 @@ class DistilBertForMultipleChoice(DistilBertPreTrainedModel):
         r"""
         input_ids (`torch.LongTensor` of shape `(batch_size, num_choices, sequence_length)`):
             Indices of input sequence tokens in the vocabulary.
-    
+
             Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for details.
-    
+
             [What are input IDs?](../glossary#input-ids)
         inputs_embeds (`torch.FloatTensor` of shape `(batch_size, num_choices, sequence_length, hidden_size)`, *optional*):
             Optionally, instead of passing `input_ids` you can choose to directly pass an embedded representation. This
             is useful if you want more control over how to convert `input_ids` indices into associated vectors than the
             model's internal embedding lookup matrix.
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
-            Labels for computing the multiple choice classification loss. Indices should be in `[0, ..., num_choices-1]`.
-        """
+            Labels for computing the multiple choice classification loss. Indices should be in `[0, ...,
+            num_choices-1]` where `num_choices` is the size of the second dimension of the input tensors. (See
+            `input_ids` above)
+
+        Examples:
+
+        ```python
+        >>> from transformers import AutoTokenizer, DistilBertForMultipleChoice
+        >>> import torch
+
+        >>> tokenizer = AutoTokenizer.from_pretrained("distilbert-base-cased")
+        >>> model = DistilBertForMultipleChoice.from_pretrained("distilbert-base-cased")
+
+        >>> prompt = "In Italy, pizza served in formal settings, such as at a restaurant, is presented unsliced."
+        >>> choice0 = "It is eaten with a fork and a knife."
+        >>> choice1 = "It is eaten while held in the hand."
+        >>> labels = torch.tensor(0).unsqueeze(0)  # choice0 is correct (according to Wikipedia ;)), batch size 1
+
+        >>> encoding = tokenizer([[prompt, choice0], [prompt, choice1]], return_tensors="pt", padding=True)
+        >>> outputs = model(**{k: v.unsqueeze(0) for k, v in encoding.items()}, labels=labels)  # batch size is 1
+
+        >>> # the linear classifier still needs to be trained
+        >>> loss = outputs.loss
+        >>> logits = outputs.logits
+        ```"""
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         num_choices = input_ids.shape[1] if input_ids is not None else inputs_embeds.shape[1]
-    
+
         input_ids = input_ids.view(-1, input_ids.size(-1)) if input_ids is not None else None
         attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
         inputs_embeds = (
@@ -1302,8 +1326,7 @@ class DistilBertForMultipleChoice(DistilBertPreTrainedModel):
             if inputs_embeds is not None
             else None
         )
-    
-        # CHANGED: unpack residual_diff by forcing return_dict=False
+
         outputs = self.distilbert(
             input_ids,
             attention_mask=attention_mask,
@@ -1311,35 +1334,32 @@ class DistilBertForMultipleChoice(DistilBertPreTrainedModel):
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
-            return_dict=False,
+            return_dict=return_dict,
         )
-    
-        hidden_state, residual_diff = outputs  # CHANGED: unpack second output as residual_diff
+
+        hidden_state = outputs[0]  # (bs * num_choices, seq_len, dim)
         pooled_output = hidden_state[:, 0]  # (bs * num_choices, dim)
-        pooled_output = self.pre_classifier(pooled_output)
-        pooled_output = nn.ReLU()(pooled_output)
-        pooled_output = self.dropout(pooled_output)
+        pooled_output = self.pre_classifier(pooled_output)  # (bs * num_choices, dim)
+        pooled_output = nn.ReLU()(pooled_output)  # (bs * num_choices, dim)
+        pooled_output = self.dropout(pooled_output)  # (bs * num_choices, dim)
         logits = self.classifier(pooled_output)  # (bs * num_choices, 1)
-    
+
         reshaped_logits = logits.view(-1, num_choices)  # (bs, num_choices)
-    
+
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = loss_fct(reshaped_logits, labels)
-    
+
         if not return_dict:
-            output = (reshaped_logits, residual_diff) + outputs[2:]  # CHANGED
+            output = (reshaped_logits,) + outputs[1:]
             return ((loss,) + output) if loss is not None else output
-    
-        return (  # CHANGED: returning tuple
-            MultipleChoiceModelOutput(
-                loss=loss,
-                logits=reshaped_logits,
-                hidden_states=None,
-                attentions=None,
-            ),
-            residual_diff,
+
+        return MultipleChoiceModelOutput(
+            loss=loss,
+            logits=reshaped_logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
         )
 
 
