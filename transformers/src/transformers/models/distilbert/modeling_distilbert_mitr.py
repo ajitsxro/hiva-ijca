@@ -1125,9 +1125,9 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
             # === CLUB Mutual Information Loss on Residuals ===
             lambda_coeff = 0.1  # Tune this as needed
             if residual_diff is not None and len(residual_diff) > 1:
-                x = torch.stack(residual_diff[:-1], dim=1).mean(dim=2)  # (bs, layers-1, dim)
-                y = torch.stack(residual_diff[1:], dim=1).mean(dim=2)   # (bs, layers-1, dim)
-                mi_loss = self.club(x, y)  # Make sure self.club is initialized in __init__
+                # x = torch.stack(residual_diff[:-1], dim=1).mean(dim=2)  # (bs, layers-1, dim)
+                # y = torch.stack(residual_diff[1:], dim=1).mean(dim=2)   # (bs, layers-1, dim)
+                # mi_loss = self.club(x, y)  # Make sure self.club is initialized in __init__
                 print("mi_loss2:", mi_loss)
                 total_loss = (1 - lambda_coeff) * task_loss + lambda_coeff * mi_loss
             else:
