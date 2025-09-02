@@ -206,6 +206,15 @@ def train(args, train_dataset, model, tokenizer):
             outputs = model(**inputs)
             # model outputs are always tuple in transformers (see doc)
             loss = outputs[0]
+            print("Loss:", loss)
+
+            # log mi
+            mi = outputs[-1]
+            print("mi:", mi)
+            mi_loss = 0.0
+            mi_loss += mi.item()
+            
+
 
             if args.n_gpu > 1:
                 loss = loss.mean()  # mean() to average on multi-gpu parallel (not distributed) training
@@ -239,7 +248,6 @@ def train(args, train_dataset, model, tokenizer):
                             tb_writer.add_scalar(f"eval_{key}", value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
 
-                    # adding perplexity here
                     current_loss = (tr_loss - logging_loss) / args.logging_steps
                     tb_writer.add_scalar("loss", current_loss, global_step)
                     
@@ -253,6 +261,9 @@ def train(args, train_dataset, model, tokenizer):
                         logger.info("Perplexity: inf")
                     
                     logging_loss = tr_loss
+
+                    tb_writer.add_scalar("mi_loss", mi_loss, global_step)
+                    logger.info("Mi_loss:", mi_loss)
 
                 # Save model checkpoint
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -861,6 +872,7 @@ def main():
 
     # Training
     if args.do_train:
+        mi = []
         train_dataset = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False)
         global_step, tr_loss = train(args, train_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
