@@ -1082,6 +1082,7 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         end_logits = end_logits.squeeze(-1).contiguous()
     
         total_loss = None
+        mi_loss = None
         if start_positions is not None and end_positions is not None:
             if len(start_positions.size()) > 1:
                 start_positions = start_positions.squeeze(-1)
@@ -1147,6 +1148,7 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
                 hidden_states=distilbert_output.hidden_states,
                 attentions=distilbert_output.attentions,
                 residuals=residual_diff,
+                mi_loss=mi_loss,
             )
 
 
