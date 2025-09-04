@@ -206,11 +206,11 @@ def train(args, train_dataset, model, tokenizer):
             outputs = model(**inputs)
             # model outputs are always tuple in transformers (see doc)
             loss = outputs[0]
-            print("Loss:", loss)
+            # print("Loss:", loss)
 
             # log mi
             mi = outputs[-1]
-            print("mi:", mi)
+            # print("mi:", mi)
             mi_loss = 0.0
             mi_loss += mi.item()
             
@@ -243,9 +243,10 @@ def train(args, train_dataset, model, tokenizer):
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     # Only evaluate when single GPU otherwise metrics may not average well
                     if args.local_rank == -1 and args.evaluate_during_training:
-                        results = evaluate(args, model, tokenizer)
-                        for key, value in results.items():
-                            tb_writer.add_scalar(f"eval_{key}", value, global_step)
+                        if global_step % 1000 == 0:
+                            results = evaluate(args, model, tokenizer)
+                            for key, value in results.items():
+                                tb_writer.add_scalar(f"eval_{key}", value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
 
                     current_loss = (tr_loss - logging_loss) / args.logging_steps
@@ -263,7 +264,7 @@ def train(args, train_dataset, model, tokenizer):
                     logging_loss = tr_loss
 
                     tb_writer.add_scalar("mi_loss", mi_loss, global_step)
-                    logger.info("Mi_loss:", mi_loss)
+                    # logger.info("Mi_loss:", mi_loss)
 
                 # Save model checkpoint
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -347,6 +348,11 @@ def evaluate(args, model, tokenizer, prefix=""):
             eval_feature = features[feature_index.item()]
             unique_id = int(eval_feature.unique_id)
 
+            # original
+            # output = [to_list(output[i]) for output in outputs.to_tuple()]
+            # print("output tuple:", output)
+
+            # modified
             # Extract outputs for this specific example (index i)
             output_tuple = outputs.to_tuple()
             output = []
@@ -389,13 +395,23 @@ def evaluate(args, model, tokenizer, prefix=""):
             else:
                 # For models like DistilBERT that may return more than 2 values but less than 5
                 # Check if first element is a scalar loss (single value in list)
-                if len(output) > 2 and isinstance(output[0], list) and len(output[0]) == 1:  # scalar loss
-                    start_logits = output[1]
-                    end_logits = output[2]
-                else:
-                    start_logits = output[0]
-                    end_logits = output[1]
+                # modified
+                # if len(output) > 2 and isinstance(output[0], list) and len(output[0]) == 1:  # scalar loss
+                #     start_logits = output[1]
+                #     end_logits = output[2]
+                # else:
+                #     start_logits = output[0]
+                #     end_logits = output[1]
+                # result = SquadResult(unique_id, start_logits, end_logits)
+
+                start_logits = output[1]
+                end_logits = output[2]
                 result = SquadResult(unique_id, start_logits, end_logits)
+
+
+                # original
+                # start_logits, end_logits = output
+                # result = SquadResult(unique_id, start_logits, end_logits)
 
             all_results.append(result)
 

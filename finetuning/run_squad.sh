@@ -38,7 +38,7 @@ python ../transformers/examples/legacy/question-answering/run_squad_finetuning.p
     --max_seq_length 384   \
     --doc_stride 128   \
     --threads 10   \
-    --save_steps 10  \
+    --save_steps 1000  \
     --logging_steps 10  \
     --evaluate_during_training \
     $MITR_FLAG 
