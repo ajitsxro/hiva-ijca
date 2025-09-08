@@ -243,7 +243,10 @@ def train(args, train_dataset, model, tokenizer):
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     # Only evaluate when single GPU otherwise metrics may not average well
                     if args.local_rank == -1 and args.evaluate_during_training:
-                        if global_step % 1000 == 0:
+
+                        # evaluate every 1000 steps but keep logging to user defined logging step
+                        # should consider turning this into an argument so we can choose when to evaluate the model
+                        if global_step % 1000 == 0: 
                             results = evaluate(args, model, tokenizer)
                             for key, value in results.items():
                                 tb_writer.add_scalar(f"eval_{key}", value, global_step)
@@ -348,31 +351,9 @@ def evaluate(args, model, tokenizer, prefix=""):
             eval_feature = features[feature_index.item()]
             unique_id = int(eval_feature.unique_id)
 
-            # original
-            # output = [to_list(output[i]) for output in outputs.to_tuple()]
-            # print("output tuple:", output)
-
-            # modified
-            # Extract outputs for this specific example (index i)
-            output_tuple = outputs.to_tuple()
-            output = []
-            for tensor in output_tuple:
-                if tensor is not None and len(tensor) > i:
-                    output.append(to_list(tensor[i]))
-                else:
-                    output.append(None)
-            
-            # Debug: print output structure (only for first example)
-            # if i == 0:
-            #     # print(f"Output length: {len(output)}")
-            #     for idx, item in enumerate(output):
-            #         if item is not None:
-            #             if isinstance(item, list) and len(item) > 0:
-            #                 print(f"Output[{idx}]: shape/length={len(item)}, type={type(item[0]) if item else 'empty'}")
-            #             else:
-            #                 print(f"Output[{idx}]: {type(item)}, value={item}")
-            #         else:
-            #             print(f"Output[{idx}]: None")
+            # exclude mi_loss to prevent out of index error
+            output_tuple = outputs.to_tuple()[:-1]  
+            output = [to_list(tensor[i]) for tensor in output_tuple]
 
             # Some models (XLNet, XLM) use 5 arguments for their predictions, while the other "simpler"
             # models only use two.
@@ -393,25 +374,8 @@ def evaluate(args, model, tokenizer, prefix=""):
                 )
 
             else:
-                # For models like DistilBERT that may return more than 2 values but less than 5
-                # Check if first element is a scalar loss (single value in list)
-                # modified
-                # if len(output) > 2 and isinstance(output[0], list) and len(output[0]) == 1:  # scalar loss
-                #     start_logits = output[1]
-                #     end_logits = output[2]
-                # else:
-                #     start_logits = output[0]
-                #     end_logits = output[1]
-                # result = SquadResult(unique_id, start_logits, end_logits)
-
-                start_logits = output[1]
-                end_logits = output[2]
+                start_logits, end_logits = output
                 result = SquadResult(unique_id, start_logits, end_logits)
-
-
-                # original
-                # start_logits, end_logits = output
-                # result = SquadResult(unique_id, start_logits, end_logits)
 
             all_results.append(result)
 
