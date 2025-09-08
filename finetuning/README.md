@@ -62,13 +62,14 @@ source run_eval.sh
 USE_MITR_MODEL=1 source run_eval.sh     
 ```
 
+To view graphs of model performance:
+```bash
+cd finetuning
+
+tensorboard --logdir ./runs
+```
+
 Results are saved in the directory as the run being evaluated as:
 - best_thresh_results.json
 - tensorboard_log.json
 
-
-
-
-
-####
-tensorboard --logdir ./runs
