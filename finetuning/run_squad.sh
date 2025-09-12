@@ -23,7 +23,6 @@ python ../transformers/examples/legacy/question-answering/run_squad_finetuning.p
     --output_dir "$OUTPUT_DIR" \
     --data_dir ./data/squadv2   \
     --overwrite_output_dir \
-    --overwrite_cache \
     --do_train  \
     --train_file train-v2.0.json   \
     --version_2_with_negative \
