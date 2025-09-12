@@ -21,7 +21,7 @@ python ../transformers/examples/legacy/question-answering/run_squad_finetuning.p
     --model_type distilbert   \
     --model_name_or_path distilbert-base-uncased  \
     --output_dir "$OUTPUT_DIR" \
-    --data_dir data/squadv2   \
+    --data_dir ./data/squadv2   \
     --overwrite_output_dir \
     --overwrite_cache \
     --do_train  \
@@ -38,7 +38,7 @@ python ../transformers/examples/legacy/question-answering/run_squad_finetuning.p
     --max_seq_length 384   \
     --doc_stride 128   \
     --threads 10   \
-    --save_steps 100  \
-    --logging_steps 100  \
+    --save_steps 1000  \
+    --logging_steps 10  \
     --evaluate_during_training \
     $MITR_FLAG 

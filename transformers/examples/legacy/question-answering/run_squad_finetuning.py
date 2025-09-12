@@ -21,6 +21,7 @@ import os
 import random
 import timeit
 import math
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -74,7 +75,11 @@ def to_list(tensor):
 def train(args, train_dataset, model, tokenizer):
     """Train the model"""
     if args.local_rank in [-1, 0]:
-        tb_writer = SummaryWriter()
+        # Create custom log directory name based on mode and date/time
+        current_datetime = datetime.now().strftime("%m%d_%H%M")
+        mode = "mitr" if args.use_mitr_model else "baseline"
+        log_dir = f"runs/squadv2_{mode}_{current_datetime}"
+        tb_writer = SummaryWriter(log_dir=log_dir)
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
@@ -201,6 +206,15 @@ def train(args, train_dataset, model, tokenizer):
             outputs = model(**inputs)
             # model outputs are always tuple in transformers (see doc)
             loss = outputs[0]
+            # print("Loss:", loss)
+
+            # log mi
+            mi = outputs[-1]
+            # print("mi:", mi)
+            mi_loss = 0.0
+            mi_loss += mi.item()
+            
+
 
             if args.n_gpu > 1:
                 loss = loss.mean()  # mean() to average on multi-gpu parallel (not distributed) training
@@ -229,12 +243,15 @@ def train(args, train_dataset, model, tokenizer):
                 if args.local_rank in [-1, 0] and args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     # Only evaluate when single GPU otherwise metrics may not average well
                     if args.local_rank == -1 and args.evaluate_during_training:
-                        results = evaluate(args, model, tokenizer)
-                        for key, value in results.items():
-                            tb_writer.add_scalar(f"eval_{key}", value, global_step)
+
+                        # evaluate every 1000 steps but keep logging to user defined logging step
+                        # should consider turning this into an argument so we can choose when to evaluate the model
+                        if global_step % 1000 == 0: 
+                            results = evaluate(args, model, tokenizer)
+                            for key, value in results.items():
+                                tb_writer.add_scalar(f"eval_{key}", value, global_step)
                     tb_writer.add_scalar("lr", scheduler.get_lr()[0], global_step)
 
-                    # adding perplexity here
                     current_loss = (tr_loss - logging_loss) / args.logging_steps
                     tb_writer.add_scalar("loss", current_loss, global_step)
                     
@@ -248,6 +265,9 @@ def train(args, train_dataset, model, tokenizer):
                         logger.info("Perplexity: inf")
                     
                     logging_loss = tr_loss
+
+                    tb_writer.add_scalar("mi_loss", mi_loss, global_step)
+                    # logger.info("Mi_loss:", mi_loss)
 
                 # Save model checkpoint
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -331,7 +351,9 @@ def evaluate(args, model, tokenizer, prefix=""):
             eval_feature = features[feature_index.item()]
             unique_id = int(eval_feature.unique_id)
 
-            output = [to_list(output[i]) for output in outputs.to_tuple()]
+            # exclude mi_loss to prevent out of index error
+            output_tuple = outputs.to_tuple()[:-1]  
+            output = [to_list(tensor[i]) for tensor in output_tuple]
 
             # Some models (XLNet, XLM) use 5 arguments for their predictions, while the other "simpler"
             # models only use two.
@@ -789,14 +811,25 @@ def main():
         )
         logger.info("Using MITR modified DistilBERT model")
     else:
-        # default 
-        model = AutoModelForQuestionAnswering.from_pretrained(
-            args.model_name_or_path,
-            from_tf=bool(".ckpt" in args.model_name_or_path),
-            config=config,
-            cache_dir=args.cache_dir if args.cache_dir else None,
-        )
-        logger.info("Using baseline model")
+        # Explicitly use the original DistilBERT model for baseline
+        if args.model_type == 'distilbert':
+            from transformers.models.distilbert.modeling_distilbert import DistilBertForQuestionAnswering
+            model = DistilBertForQuestionAnswering.from_pretrained(
+                args.model_name_or_path,
+                from_tf=bool(".ckpt" in args.model_name_or_path),
+                config=config,
+                cache_dir=args.cache_dir if args.cache_dir else None,
+            )
+            logger.info("Using baseline DistilBERT model")
+        else:
+            # For other model types, use AutoModel
+            model = AutoModelForQuestionAnswering.from_pretrained(
+                args.model_name_or_path,
+                from_tf=bool(".ckpt" in args.model_name_or_path),
+                config=config,
+                cache_dir=args.cache_dir if args.cache_dir else None,
+            )
+            logger.info("Using baseline model")
 
     if args.local_rank == 0:
         # Make sure only the first process in distributed training will download model & vocab
@@ -819,6 +852,7 @@ def main():
 
     # Training
     if args.do_train:
+        mi = []
         train_dataset = load_and_cache_examples(args, tokenizer, evaluate=False, output_examples=False)
         global_step, tr_loss = train(args, train_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
@@ -838,6 +872,10 @@ def main():
 
         # Load a trained model and vocabulary that you have fine-tuned
         if args.use_mitr_model and args.model_type == 'distilbert':
+            from transformers.models.distilbert.modeling_distilbert_mitr import DistilBertForQuestionAnswering
+            model = DistilBertForQuestionAnswering.from_pretrained(args.output_dir)
+        elif args.model_type == 'distilbert':
+            from transformers.models.distilbert.modeling_distilbert import DistilBertForQuestionAnswering
             model = DistilBertForQuestionAnswering.from_pretrained(args.output_dir)
         else:
             model = AutoModelForQuestionAnswering.from_pretrained(args.output_dir)  # , force_download=True)
@@ -869,6 +907,10 @@ def main():
             # Reload the model
             global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
             if args.use_mitr_model and args.model_type == 'distilbert':
+                from transformers.models.distilbert.modeling_distilbert_mitr import DistilBertForQuestionAnswering
+                model = DistilBertForQuestionAnswering.from_pretrained(checkpoint)
+            elif args.model_type == 'distilbert':
+                from transformers.models.distilbert.modeling_distilbert import DistilBertForQuestionAnswering
                 model = DistilBertForQuestionAnswering.from_pretrained(checkpoint)
             else:
                 model = AutoModelForQuestionAnswering.from_pretrained(checkpoint)  # , force_download=True)

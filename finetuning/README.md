@@ -24,13 +24,14 @@ source .venv/bin/activate
 # Install transformers package from director
 cd transformers
 uv pip install .
+cd ..
 
 # Verify installation
 python --version
 uv pip list
 ```
 
-## Running the Baseline
+## Running the finetune
 
 ### DistilBert + SQuAD v2.0 Training Script
 
@@ -38,7 +39,7 @@ To run DistilBERT fine-tuning on SQuAD v2.0:
 
 ```bash
 # Navigate to the baseline directory
-cd baseline
+cd finetuning
 
 # Run the finetuning script for baseline
 source run_squad.sh
@@ -52,7 +53,7 @@ USE_MITR_MODEL=1 source run_squad.sh
 After running the training script, to evaluate the model:
 
 ```bash
-cd baseline
+cd finetuning
 
 # Run the evaluation script
 source run_eval.sh
@@ -61,6 +62,14 @@ source run_eval.sh
 USE_MITR_MODEL=1 source run_eval.sh     
 ```
 
-Results are saved in the evaluation directory as:
+To view graphs of model performance:
+```bash
+cd finetuning
+
+tensorboard --logdir ./runs
+```
+
+Results are saved in the directory as the run being evaluated as:
 - best_thresh_results.json
 - tensorboard_log.json
+

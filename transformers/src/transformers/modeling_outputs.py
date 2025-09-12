@@ -1135,7 +1135,7 @@ class QuestionAnsweringModelOutput(ModelOutput):
     hidden_states: Optional[tuple[torch.FloatTensor, ...]] = None
     attentions: Optional[tuple[torch.FloatTensor, ...]] = None
     residuals: Optional[tuple[torch.FloatTensor, ...]] = None
-
+    mi_loss: Optional[torch.FloatTensor] = None
 
 @dataclass
 class Seq2SeqQuestionAnsweringModelOutput(ModelOutput):

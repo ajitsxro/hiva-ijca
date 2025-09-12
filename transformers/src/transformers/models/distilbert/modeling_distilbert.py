@@ -524,10 +524,17 @@ class Transformer(nn.Module):
         all_attentions = () if output_attentions else None
 
         hidden_state = x
+
+        residuals = []
+        all_residual_diffs = []
+        prev_h = hidden_state
+
         for i, layer_module in enumerate(self.layer):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_state,)
 
+
+            prev_hidden = hidden_state
             layer_outputs = layer_module(
                 hidden_state,
                 attn_mask,
@@ -536,6 +543,15 @@ class Transformer(nn.Module):
             )
 
             hidden_state = layer_outputs[-1]
+
+            if i > 0:  # skip first layer since it has no previous hidden state
+                residual_diff = hidden_state - prev_h
+                all_residual_diffs.append(residual_diff)
+    
+            prev_h = hidden_state  # store for next iteration
+
+    
+            residuals.append(hidden_state - prev_hidden)  # <-- NEW: R_i = H_i - H_{i-1}
 
             if output_attentions:
                 if len(layer_outputs) != 2:
@@ -550,11 +566,12 @@ class Transformer(nn.Module):
         # Add last layer
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_state,)
+            self.residuals = residuals
 
         if not return_dict:
             return tuple(v for v in [hidden_state, all_hidden_states, all_attentions] if v is not None)
         return BaseModelOutput(
-            last_hidden_state=hidden_state, hidden_states=all_hidden_states, attentions=all_attentions
+            last_hidden_state=hidden_state, hidden_states=all_hidden_states, attentions=all_attentions, residual_diff=all_residual_diffs
         )
 
 
@@ -962,6 +979,10 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
 
         self.distilbert = DistilBertModel(config)
         self.qa_outputs = nn.Linear(config.dim, config.num_labels)
+
+        from .club import CLUBSample  # make sure CLUB repo is cloned into your project
+        self.club = CLUBSample(config.hidden_size, config.hidden_size, config.hidden_size)
+
         if config.num_labels != 2:
             raise ValueError(f"config.num_labels should be 2, but it is {config.num_labels}")
 
@@ -1017,7 +1038,7 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
             model's internal embedding lookup matrix.
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
+        print("return_dict:", return_dict)
         distilbert_output = self.distilbert(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -1029,6 +1050,11 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         )
         hidden_states = distilbert_output[0]  # (bs, max_query_len, dim)
 
+        if distilbert_output.residual_diff is not None:
+            residual_diff = distilbert_output.residual_diff
+        else:
+            residual_diff = None
+
         hidden_states = self.dropout(hidden_states)  # (bs, max_query_len, dim)
         logits = self.qa_outputs(hidden_states)  # (bs, max_query_len, 2)
         start_logits, end_logits = logits.split(1, dim=-1)
@@ -1036,6 +1062,7 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         end_logits = end_logits.squeeze(-1).contiguous()  # (bs, max_query_len)
 
         total_loss = None
+        mi_loss = None
         if start_positions is not None and end_positions is not None:
             # If we are on multi-GPU, split add a dimension
             if len(start_positions.size()) > 1:
@@ -1052,6 +1079,21 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
             end_loss = loss_fct(end_logits, end_positions)
             total_loss = (start_loss + end_loss) / 2
 
+
+            # === CLUB MI Regularization ===
+            #Is this the I(Hi, Hi+1)?
+            mi_loss = 0.0
+            # if output_hidden_states and "residual_diff" in distilbert_output and distilbert_output["residual_diff"] is not None:
+            if distilbert_output["residual_diff"] is not None:
+                residuals = distilbert_output["residual_diff"]
+                for i in range(len(residuals) - 1):
+                    # CLUB estimates MI between consecutive residual diffs
+                    mi_loss += self.club(residuals[i], residuals[i+1]).mean()
+                    # print("mi mean:", mi_loss)
+                mi_loss = mi_loss / (len(residuals) - 1)
+
+        
+
         if not return_dict:
             output = (start_logits, end_logits) + distilbert_output[1:]
             return ((total_loss,) + output) if total_loss is not None else output
@@ -1062,6 +1104,8 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
             end_logits=end_logits,
             hidden_states=distilbert_output.hidden_states,
             attentions=distilbert_output.attentions,
+            residuals=residual_diff,
+            mi_loss=mi_loss
         )
 
 
