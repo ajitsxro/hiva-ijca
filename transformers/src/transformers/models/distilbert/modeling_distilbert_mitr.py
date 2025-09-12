@@ -511,7 +511,7 @@ class Transformer(nn.Module):
         self.layer = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_layers)])
         self.gradient_checkpointing = False
 
-        
+
     def forward(
         self,
         x: torch.Tensor,
@@ -523,19 +523,19 @@ class Transformer(nn.Module):
     ) -> tuple[torch.Tensor, ...]:  # <-- KEEPING your original return type
         all_hidden_states = () if output_hidden_states else None
         all_attentions = () if output_attentions else None
-    
+
         print('forward')
         hidden_state = x
         residuals = []  # <-- NEW: Store layer-wise residual deltas
-    
+
         all_residual_diffs = []
         prev_h = hidden_state  # initial hidden state before first layer
-    
-    
+
+
         for i, layer_module in enumerate(self.layer):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_state,)
-    
+
             prev_hidden = hidden_state  # <-- NEW: Save H_{i-1}
             layer_outputs = layer_module(
                 hidden_state,
@@ -544,14 +544,14 @@ class Transformer(nn.Module):
                 output_attentions,
             )
             hidden_state = layer_outputs[-1]
-    
+
             if i > 0:  # skip first layer since it has no previous hidden state
                 residual_diff = hidden_state - prev_h
                 all_residual_diffs.append(residual_diff)
-    
+
             prev_h = hidden_state  # store for next iteration
 
-    
+
             residuals.append(hidden_state - prev_hidden)  # <-- NEW: R_i = H_i - H_{i-1}
             print('residuals:', len(residuals))
 
@@ -564,16 +564,16 @@ class Transformer(nn.Module):
             else:
                 if len(layer_outputs) != 1:
                     raise ValueError(f"The length of the layer_outputs should be 1, but it is {len(layer_outputs)}")
-    
+
         if output_hidden_states:
             # print('output hidden states')
             all_hidden_states = all_hidden_states + (hidden_state,)
             self.residuals = residuals  # <-- NEW: Save residuals as class attribute
-    
+
         print("Return_dict:", return_dict)
         if not return_dict:
             return tuple(v for v in [hidden_state, all_hidden_states, all_attentions] if v is not None)
-    
+
         # print('before output')
         outputs = BaseModelOutput(
             last_hidden_state=hidden_state,
@@ -585,15 +585,19 @@ class Transformer(nn.Module):
 
         # print('outputs:', outputs)
         print("residual_diffs 1:", all_residual_diffs[0].shape)
-        
-        # Add residual diffs manually as a new dict-like key
-        # outputs["residual_diffs"] = all_residual_diffs if output_hidden_states else None
-        # outputs["residual_diffs"] = all_residual_diffs
         print('output length 2:', len(outputs))
-        
+
         # print(outputs.shape)
         return outputs
 
+        '''
+        consider 
+        Freezing everything but highest mi layer
+        Freezing everything below a certain threshold
+
+        Apply our loss function to only high mi layers
+        apply cross entropy to layers below threshold
+        '''
 
 
 # INTERFACE FOR ENCODER AND TASK SPECIFIC MODEL #
@@ -1048,7 +1052,7 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         return_dict: Optional[bool] = None,
     ) -> Union[tuple[torch.Tensor, ...], QuestionAnsweringModelOutput]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-    
+
         distilbert_output = self.distilbert(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -1058,11 +1062,6 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=True,  # force tuple output to unpack residuals
         )
-        # print(distilbert_output)
-        # print('output length:', len(distilbert_output))
-
-        # print(distilbert_output.shape)
-        # hidden_states, residual_diff= distilbert_output[:2]
         hidden_states = distilbert_output[0]
 
         if distilbert_output.residual_diff is not None:
@@ -1074,13 +1073,13 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         # print("residual_diff:", residual_diff)
         print("residual shape:", len(residual_diff))
         print("residualdif0:", residual_diff[0].shape)
-    
+
         hidden_states = self.dropout(hidden_states)
         logits = self.qa_outputs(hidden_states)
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1).contiguous()
         end_logits = end_logits.squeeze(-1).contiguous()
-    
+
         total_loss = None
         mi_loss = None
         if start_positions is not None and end_positions is not None:
@@ -1088,11 +1087,11 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
                 start_positions = start_positions.squeeze(-1)
             if len(end_positions.size()) > 1:
                 end_positions = end_positions.squeeze(-1)
-    
+
             ignored_index = start_logits.size(1)
             start_positions = start_positions.clamp(0, ignored_index)
             end_positions = end_positions.clamp(0, ignored_index)
-    
+
             loss_fct = nn.CrossEntropyLoss(ignore_index=ignored_index)
             start_loss = loss_fct(start_logits, start_positions)
             end_loss = loss_fct(end_logits, end_positions)
@@ -1100,7 +1099,7 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
 
             print('task_loss:', task_loss)
             print("task_loss.shape:", task_loss.shape)
-            
+
             # === CLUB MI Regularization ===
             #Is this the I(Hi, Hi+1)?
             mi_loss = 0.0
@@ -1109,28 +1108,26 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
                 residuals = distilbert_output["residual_diff"]
                 for i in range(len(residuals) - 1):
                     # CLUB estimates MI between consecutive residual diffs
-                    mi_loss += self.club(residuals[i], residuals[i+1]).mean()
+
+                    x = residuals[i].mean(dim=1)
+                    y = residuals[i+1].mean(dim=1)
+                    # normalize
+                    x = torch.nn.functional.layer_norm(x, (x.size(-1),))
+                    y = torch.nn.functional.layer_norm(y, (y.size(-1),))
+
+                    mi_loss += self.club(x, y)
+
+                    # mi_loss += self.club(residuals[i], residuals[i+1]).mean()
                     print("mi mean:", mi_loss)
                 mi_loss = mi_loss / (len(residuals) - 1)
 
                 print("mi_loss:", mi_loss)
-        
-            # Combine QA loss with MI regularization
-            #Hiva: what is qa_loss
-            # loss = qa_loss + self.lambda_val * mi_loss
-            # else:
-            #     # In inference mode, just use QA loss
-            #     loss = None
-    
-    
+
             # === CLUB Mutual Information Loss on Residuals ===
-            lambda_coeff = 0.1  # Tune this as needed
+            lambda_coeff = 1e-5  # Tune this as needed
             if residual_diff is not None and len(residual_diff) > 1:
-                # x = torch.stack(residual_diff[:-1], dim=1).mean(dim=2)  # (bs, layers-1, dim)
-                # y = torch.stack(residual_diff[1:], dim=1).mean(dim=2)   # (bs, layers-1, dim)
-                # mi_loss = self.club(x, y)  # Make sure self.club is initialized in __init__
                 print("mi_loss2:", mi_loss)
-                total_loss = (1 - lambda_coeff) * task_loss + lambda_coeff * mi_loss
+                total_loss = ((1 - lambda_coeff) * task_loss) + (lambda_coeff * mi_loss)
             else:
                 total_loss = task_loss
             print("total_loss", total_loss)
@@ -1138,13 +1135,11 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         if not return_dict:
             output = (start_logits, end_logits, residual_diff) + distilbert_output[2:]
             return ((total_loss,) + output) if total_loss is not None else output
-    
+
         return QuestionAnsweringModelOutput(
                 loss=total_loss,
                 start_logits=start_logits,
                 end_logits=end_logits,
-                # hidden_states=None,
-                # attentions=None,
                 hidden_states=distilbert_output.hidden_states,
                 attentions=distilbert_output.attentions,
                 residuals=residual_diff,

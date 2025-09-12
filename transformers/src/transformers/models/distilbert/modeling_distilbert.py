@@ -1088,8 +1088,17 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
                 residuals = distilbert_output["residual_diff"]
                 for i in range(len(residuals) - 1):
                     # CLUB estimates MI between consecutive residual diffs
-                    mi_loss += self.club(residuals[i], residuals[i+1]).mean()
-                    # print("mi mean:", mi_loss)
+
+                    x = residuals[i].mean(dim=1)
+                    y = residuals[i+1].mean(dim=1)
+                    # normalize
+                    x = torch.nn.functional.layer_norm(x, (x.size(-1),))
+                    y = torch.nn.functional.layer_norm(y, (y.size(-1),))
+
+                    mi_loss += self.club(x, y)
+
+                    # mi_loss += self.club(residuals[i], residuals[i+1]).mean()
+                    print("mi mean:", mi_loss)
                 mi_loss = mi_loss / (len(residuals) - 1)
 
         
