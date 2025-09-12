@@ -536,7 +536,7 @@ class Transformer(nn.Module):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_state,)
 
-            prev_hidden = hidden_state  # <-- NEW: Save H_{i-1}
+            prev_hidden = hidden_state  # Save current state before layer
             layer_outputs = layer_module(
                 hidden_state,
                 attn_mask,
@@ -545,14 +545,19 @@ class Transformer(nn.Module):
             )
             hidden_state = layer_outputs[-1]
 
+            # Calculate residual difference for MI calculation
             if i > 0:  # skip first layer since it has no previous hidden state
+                # Use previous hidden state stored from last iteration
                 residual_diff = hidden_state - prev_h
+                # Normalize residual difference to prevent extreme values
+                residual_diff = residual_diff / (torch.norm(residual_diff, dim=-1, keepdim=True) + 1e-8)
                 all_residual_diffs.append(residual_diff)
 
-            prev_h = hidden_state  # store for next iteration
+            prev_h = hidden_state  # store current state for next iteration
 
-
-            residuals.append(hidden_state - prev_hidden)  # <-- NEW: R_i = H_i - H_{i-1}
+            # Store layer-wise residuals for potential other uses
+            layer_residual = hidden_state - prev_hidden
+            residuals.append(layer_residual)
             print('residuals:', len(residuals))
 
             if output_attentions:
@@ -584,10 +589,10 @@ class Transformer(nn.Module):
         # print('after output')
 
         # print('outputs:', outputs)
-        print("residual_diffs 1:", all_residual_diffs[0].shape)
+        if all_residual_diffs:
+            print("residual_diffs 1:", all_residual_diffs[0].shape)
         print('output length 2:', len(outputs))
 
-        # print(outputs.shape)
         return outputs
 
         '''
@@ -1101,36 +1106,71 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
             print("task_loss.shape:", task_loss.shape)
 
             # === CLUB MI Regularization ===
-            #Is this the I(Hi, Hi+1)?
-            mi_loss = 0.0
-            # if output_hidden_states and "residual_diff" in distilbert_output and distilbert_output["residual_diff"] is not None:
-            if distilbert_output["residual_diff"] is not None:
+            mi_loss = torch.tensor(0.0, device=task_loss.device, requires_grad=True)
+            
+            if distilbert_output["residual_diff"] is not None and len(distilbert_output["residual_diff"]) > 1:
                 residuals = distilbert_output["residual_diff"]
+                valid_mi_estimates = []
+                
                 for i in range(len(residuals) - 1):
-                    # CLUB estimates MI between consecutive residual diffs
+                    # Get consecutive residual differences
+                    x = residuals[i].mean(dim=1)  # [batch_size, hidden_dim]
+                    y = residuals[i+1].mean(dim=1)  # [batch_size, hidden_dim]
+                    
+                    print(f"Raw x stats: mean={x.mean().item():.4f}, std={x.std().item():.4f}")
+                    print(f"Raw y stats: mean={y.mean().item():.4f}, std={y.std().item():.4f}")
+                    
+                    # Light normalization - preserve more signal
+                    x_mean, x_std = x.mean(dim=0, keepdim=True), x.std(dim=0, keepdim=True) + 1e-6
+                    y_mean, y_std = y.mean(dim=0, keepdim=True), y.std(dim=0, keepdim=True) + 1e-6
+                    
+                    x_normalized = (x - x_mean) / x_std
+                    y_normalized = (y - y_mean) / y_std
+                    
+                    # Light clipping instead of heavy tanh squashing
+                    x_normalized = torch.clamp(x_normalized, min=-3.0, max=3.0)
+                    y_normalized = torch.clamp(y_normalized, min=-3.0, max=3.0)
+                    
+                    print(f"Normalized x stats: mean={x_normalized.mean().item():.4f}, std={x_normalized.std().item():.4f}")
+                    print(f"Normalized y stats: mean={y_normalized.mean().item():.4f}, std={y_normalized.std().item():.4f}")
+                    
+                    # Compute MI estimate with CLUB
+                    mi_estimate = self.club(x_normalized, y_normalized)
+                    
+                    print(f"Layer {i}->{i+1} raw MI estimate:", mi_estimate.item())
+                    
+                    # Only include reasonable MI estimates (filter out extreme values)
+                    if torch.isfinite(mi_estimate) and torch.abs(mi_estimate) < 100.0:  # Increased threshold
+                        valid_mi_estimates.append(mi_estimate)
+                        print(f"Layer {i}->{i+1} MI estimate (accepted):", mi_estimate.item())
+                    else:
+                        print(f"Layer {i}->{i+1} MI estimate (rejected): {mi_estimate.item()}")
+                
+                # Average valid MI estimates
+                if valid_mi_estimates:
+                    mi_loss = torch.stack(valid_mi_estimates).mean()
+                    print(f"Final averaged mi_loss: {mi_loss.item():.8f} (from {len(valid_mi_estimates)} estimates)")
+                else:
+                    print("No valid MI estimates, using zero MI loss")
 
-                    x = residuals[i].mean(dim=1)
-                    y = residuals[i+1].mean(dim=1)
-                    # normalize
-                    x = torch.nn.functional.layer_norm(x, (x.size(-1),))
-                    y = torch.nn.functional.layer_norm(y, (y.size(-1),))
-
-                    mi_loss += self.club(x, y)
-
-                    # mi_loss += self.club(residuals[i], residuals[i+1]).mean()
-                    print("mi mean:", mi_loss)
-                mi_loss = mi_loss / (len(residuals) - 1)
-
-                print("mi_loss:", mi_loss)
-
-            # === CLUB Mutual Information Loss on Residuals ===
-            lambda_coeff = 1e-5  # Tune this as needed
-            if residual_diff is not None and len(residual_diff) > 1:
-                print("mi_loss2:", mi_loss)
-                total_loss = ((1 - lambda_coeff) * task_loss) + (lambda_coeff * mi_loss)
+            # === Combine Task Loss with MI Regularization ===
+            lambda_coeff = 1e-2  # Significantly increased for more visible effect
+            
+            print(f"Raw mi_loss: {mi_loss.item():.8f}")
+            print(f"Abs mi_loss: {torch.abs(mi_loss).item():.8f}")
+            
+            # For MI regularization, we want to minimize MI, so subtract it from loss
+            # or take its absolute value and add it (both achieve regularization)
+            if torch.abs(mi_loss) > 1e-8:  # Lower threshold to catch smaller values
+                # Use absolute value to ensure we're always adding a positive regularization term
+                mi_reg_term = lambda_coeff * torch.abs(mi_loss)
+                total_loss = task_loss + mi_reg_term
+                print(f"Task loss: {task_loss.item():.6f}, MI reg term: {mi_reg_term.item():.6f}")
             else:
                 total_loss = task_loss
-            print("total_loss", total_loss)
+                print("Using task loss only (no MI regularization - mi_loss too small)")
+            
+            print(f"Final total_loss: {total_loss.item():.6f}")
 
         if not return_dict:
             output = (start_logits, end_logits, residual_diff) + distilbert_output[2:]

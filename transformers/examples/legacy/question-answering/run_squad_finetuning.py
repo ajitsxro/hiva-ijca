@@ -208,11 +208,17 @@ def train(args, train_dataset, model, tokenizer):
             loss = outputs[0]
             # print("Loss:", loss)
 
-            # log mi
-            mi = outputs[-1]
-            # print("mi:", mi)
+            # log mi - safely extract mi_loss if available
             mi_loss = 0.0
-            mi_loss += mi.item()
+            if hasattr(outputs, 'mi_loss') and outputs.mi_loss is not None:
+                mi_loss = outputs.mi_loss.item() if torch.is_tensor(outputs.mi_loss) else 0.0
+            elif len(outputs) > 3:  # Check if mi_loss is in tuple output
+                try:
+                    mi = outputs[-1]
+                    if torch.is_tensor(mi):
+                        mi_loss = mi.item()
+                except (IndexError, AttributeError):
+                    mi_loss = 0.0
             
 
 
@@ -266,8 +272,9 @@ def train(args, train_dataset, model, tokenizer):
                     
                     logging_loss = tr_loss
 
-                    tb_writer.add_scalar("mi_loss", mi_loss, global_step)
-                    # logger.info("Mi_loss:", mi_loss)
+                    if mi_loss != 0.0:
+                        tb_writer.add_scalar("mi_loss", mi_loss, global_step)
+                        logger.info(f"MI_loss: {mi_loss:.6f}")
 
                 # Save model checkpoint
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
@@ -351,8 +358,14 @@ def evaluate(args, model, tokenizer, prefix=""):
             eval_feature = features[feature_index.item()]
             unique_id = int(eval_feature.unique_id)
 
-            # exclude mi_loss to prevent out of index error
-            output_tuple = outputs.to_tuple()[:-1]  
+            # Convert outputs to tuple, handling both dict and tuple outputs
+            if hasattr(outputs, 'to_tuple'):
+                # For model outputs that have to_tuple method
+                output_tuple = outputs.to_tuple()[:2]  # Only take start_logits and end_logits
+            else:
+                # For tuple outputs, take first 2 elements (start_logits, end_logits)
+                output_tuple = outputs[:2]
+            
             output = [to_list(tensor[i]) for tensor in output_tuple]
 
             # Some models (XLNet, XLM) use 5 arguments for their predictions, while the other "simpler"
