@@ -252,7 +252,7 @@ def train(args, train_dataset, model, tokenizer):
 
                         # evaluate every 1000 steps but keep logging to user defined logging step
                         # should consider turning this into an argument so we can choose when to evaluate the model
-                        if global_step % 1000 == 0: 
+                        if global_step % 1000 == 0:
                             results = evaluate(args, model, tokenizer)
                             for key, value in results.items():
                                 tb_writer.add_scalar(f"eval_{key}", value, global_step)
@@ -443,6 +443,7 @@ def evaluate(args, model, tokenizer, prefix=""):
 
     # Compute the F1 and exact scores.
     results = squad_evaluate(examples, predictions)
+    results['time'] = evalTime
     return results
 
 
