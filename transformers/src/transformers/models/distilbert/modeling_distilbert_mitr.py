@@ -998,10 +998,13 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         # self.club = CLUB(config.dim)
         self.distilbert = DistilBertModel(config)
         self.qa_outputs = nn.Linear(config.dim, config.num_labels)
-                # === CLUB Mutual Information Regularizer ===
+        # QA head for residuals - same structure as main QA head
+        self.residual_qa_outputs = nn.Linear(config.dim, config.num_labels)
+
+        # === CLUB Mutual Information Regularizer ===
         self.lambda_val = 0.1  # weighting factor for MI loss
         from .club import CLUBSample  # make sure CLUB repo is cloned into your project
-        self.club = CLUBSample(config.hidden_size, config.hidden_size, config.hidden_size)
+        self.club = CLUBSample(1, 1, config.hidden_size)  # (B, 1) inputs for QA summaries
 
         if config.num_labels != 2:
             raise ValueError(f"config.num_labels should be 2, but it is {config.num_labels}")
@@ -1095,63 +1098,65 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
             print('task_loss:', task_loss)
             print("task_loss.shape:", task_loss.shape)
 
-            # === CLUB MI Regularization ===
-            #Is this the I(Hi, Hi+1)?
-            mi_loss = 0.0
-            mi_list = []
-            # if output_hidden_states and "residual_diff" in distilbert_output and distilbert_output["residual_diff"] is not None:
+            # === CLUB MI Regularization with QA-aligned residual summaries ===
+            device = hidden_states.device
+            mi_loss = torch.tensor(0.0, device=device)
 
-            def robust_mean(x, c=1.0, eps=1e-8):
-                # weights down-weight large |x - median|
-                m = x.median()
-                r = (x - m).abs()
-                w = 1.0 / (1.0 + (r / c))          # smooth inverse-magnitude weights
-                w = w / (w.sum() + eps)
-                return (w * x).sum()
-
-            # mean_val = robust_mean(xs, c=0.1)      # tune c to control outlier impact
-
-            if distilbert_output["residual_diff"] is not None:
+            if distilbert_output["residual_diff"] is not None and len(distilbert_output["residual_diff"]) > 1:
                 residuals = distilbert_output["residual_diff"]
-                for i in range(len(residuals) - 1):
-                    x = residuals[i].mean(dim=1)
-                    y = residuals[i+1].mean(dim=1)
-                    # normalize
-                    x = torch.nn.functional.layer_norm(x, (x.size(-1),))
-                    y = torch.nn.functional.layer_norm(y, (y.size(-1),))
+                se_summaries = []
 
-                    mi_estimate = self.club(x, y)
-                    mi_loss += -mi_estimate  # Penalize HIGH MI by flipping CLUB's sign
-                    mi_list.append(mi_estimate)
+                # For each layer residual, compute QA-style summaries
+                for residual in residuals:
+                    # Ensure residual is on the same device
+                    residual = residual.to(device)
 
-                    # mi_loss += self.club(residuals[i], residuals[i+1]).mean()
-                    print("mi mean:", mi_loss)
-                mi_loss = mi_loss / (len(residuals) - 1)
+                    # Apply QA head to residuals: (B, L, D) -> (B, L, 2)
+                    res_logits = self.residual_qa_outputs(residual)
+                    res_start = res_logits[..., 0]  # (B, L)
+                    res_end = res_logits[..., 1]    # (B, L)
 
-                print("mi_loss:", mi_loss)
+                    # Ensure positions are on the same device
+                    start_positions_device = start_positions.to(device)
+                    end_positions_device = end_positions.to(device)
 
-            # mi_standardized= []
+                    # Extract values at gold start/end positions
+                    start_vals = res_start.gather(1, start_positions_device.unsqueeze(1)).squeeze(1)  # (B,)
+                    end_vals = res_end.gather(1, end_positions_device.unsqueeze(1)).squeeze(1)        # (B,)
 
-            # for mi in mi_list:
-            #     mi_standardized.append()
-            
-            print("Mean mi:", mi_list.mean())
+                    # Average start and end values to get per-example scalar summary
+                    se_summary = 0.5 * (start_vals + end_vals)  # (B,)
+                    se_summary = se_summary.unsqueeze(-1)       # (B, 1) for CLUB
 
-            mean_mi = robust_mean(mi_list, c=0.5)
-            print("Robust Mean mi:", mean_mi)
-            
+                    # Normalize to control scale and improve CLUB stability
+                    se_summary = torch.nn.functional.normalize(se_summary, dim=0, eps=1e-8)
+                    se_summaries.append(se_summary)
 
+                # Estimate MI between consecutive layers' summaries
+                for i in range(len(se_summaries) - 1):
+                    mi_estimate = self.club(se_summaries[i], se_summaries[i+1])
+                    mi_loss += mi_estimate.mean()
 
-            # === CLUB Mutual Information Loss on Residuals ===
-            lambda_coeff = 1e-5  # Tune this as needed
-            if residual_diff is not None and len(residual_diff) > 1:
-                print("mi_loss2:", mi_loss)
-                # total_loss = ((1 - lambda_coeff) * task_loss) + (lambda_coeff * mi_loss)
-                total_loss = ((1 - lambda_coeff) * task_loss) + (lambda_coeff * mean_mi)
+                # Average over all consecutive pairs
+                if len(se_summaries) > 1:
+                    mi_loss = mi_loss / (len(se_summaries) - 1)
+                    print("mi_loss (QA-aligned):", mi_loss.item())
 
             else:
+                print("No residuals available for MI calculation")
+            
+
+
+            # === Combine QA loss with MI loss ===
+            lambda_coeff = 0.01 
+            if residual_diff is not None and len(residual_diff) > 1:
+                # Ensure mi_loss is on the same device as task_loss
+                mi_loss = mi_loss.to(task_loss.device)
+                total_loss = ((1 - lambda_coeff) * task_loss) + (lambda_coeff * mi_loss)
+                print(f"task_loss: {task_loss.item():.4f}, mi_loss: {mi_loss.item():.4f}, total_loss: {total_loss.item():.4f}")
+            else:
                 total_loss = task_loss
-            print("total_loss", total_loss)
+                print(f"total_loss (no MI): {total_loss.item():.4f}")
 
         if not return_dict:
             output = (start_logits, end_logits, residual_diff) + distilbert_output[2:]
