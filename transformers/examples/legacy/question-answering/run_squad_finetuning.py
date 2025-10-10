@@ -25,6 +25,17 @@ from datetime import datetime
 
 import numpy as np
 import torch
+
+import matplotlib.pyplot as plt
+from ckatorch import CKA
+'''
+    I am trying this rather than CLUB
+    
+    Centered Kernel Alignment (CKA) [1] is a similarity index between representations of features in neural networks,
+    based on the Hilbert-Schmidt Independence Criterion (HSIC) [2]. Given a set of examples, CKA compares the representations
+    of examples passed through the layers that we want to compare.
+'''
+
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
@@ -110,8 +121,8 @@ def train(args, train_dataset, model, tokenizer):
         os.path.join(args.model_name_or_path, "scheduler.pt")
     ):
         # Load in optimizer and scheduler states
-        optimizer.load_state_dict(torch.load(os.path.join(args.model_name_or_path, "optimizer.pt"), weights_only=True))
-        scheduler.load_state_dict(torch.load(os.path.join(args.model_name_or_path, "scheduler.pt"), weights_only=True))
+        optimizer.load_state_dict(torch.load(os.path.join(args.model_name_or_path, "optimizer.pt"))) # removed weights only
+        scheduler.load_state_dict(torch.load(os.path.join(args.model_name_or_path, "scheduler.pt"))) # removed weights only
 
     if args.fp16:
         try:
@@ -203,22 +214,28 @@ def train(args, train_dataset, model, tokenizer):
                         {"langs": (torch.ones(batch[0].shape, dtype=torch.int64) * args.lang_id).to(args.device)}
                     )
 
+
+            # adding this to make sure we are getting the hidden states
+
+            inputs["output_hidden_states"] = True
+
+
             outputs = model(**inputs)
             # model outputs are always tuple in transformers (see doc)
             loss = outputs[0]
             # print("Loss:", loss)
 
             # log mi - safely extract mi_loss if available
-            mi_loss = 0.0
-            if hasattr(outputs, 'mi_loss') and outputs.mi_loss is not None:
-                mi_loss = outputs.mi_loss.item() if torch.is_tensor(outputs.mi_loss) else 0.0
-            elif len(outputs) > 3:  # Check if mi_loss is in tuple output
-                try:
-                    mi = outputs[-1]
-                    if torch.is_tensor(mi):
-                        mi_loss = mi.item()
-                except (IndexError, AttributeError):
-                    mi_loss = 0.0
+            # mi_loss = 0.0
+            # if hasattr(outputs, 'mi_loss') and outputs.mi_loss is not None:
+            #     mi_loss = outputs.mi_loss.item() if torch.is_tensor(outputs.mi_loss) else 0.0
+            # elif len(outputs) > 3:  # Check if mi_loss is in tuple output
+            #     try:
+            #         mi = outputs[-1]
+            #         if torch.is_tensor(mi):
+            #             mi_loss = mi.item()
+            #     except (IndexError, AttributeError):
+            #         mi_loss = 0.0
             
 
 
@@ -272,9 +289,69 @@ def train(args, train_dataset, model, tokenizer):
                     
                     logging_loss = tr_loss
 
-                    if mi_loss != 0.0:
-                        tb_writer.add_scalar("mi_loss", mi_loss, global_step)
-                        logger.info(f"MI_loss: {mi_loss:.6f}")
+                    # if mi_loss != 0.0:
+                    #     tb_writer.add_scalar("mi_loss", mi_loss, global_step)
+                    #     logger.info(f"MI_loss: {mi_loss:.6f}")
+
+                    activations = outputs.hidden_states
+
+                    # Get the number of layers from the model config
+                    # For DistilBERT, use the correct layer naming convention
+                    num_hidden_layers = model.config.n_layers if hasattr(model.config, 'n_layers') else len(activations) - 1
+                    # DistilBERT layers are named "distilbert.transformer.layer.{i}"
+                    layers = [f"distilbert.transformer.layer.{i}" for i in range(num_hidden_layers)]
+
+                    reshaped_activations = [act.view(-1, act.size(-1)) for act in activations]
+                    num_layers = len(reshaped_activations)
+                    cka_matrix = np.zeros((num_layers, num_layers))
+
+                    def compute_cka(X, Y):
+                        """Compute CKA between two activation matrices"""
+                        # Center the matrices
+                        X = X - X.mean(dim=0, keepdim=True)
+                        Y = Y - Y.mean(dim=0, keepdim=True)
+
+                        # Compute Gram matrices
+                        K = torch.mm(X, X.t())
+                        L = torch.mm(Y, Y.t())
+
+                        # Compute HSIC
+                        n = K.size(0)
+                        H = torch.eye(n, device=K.device) - torch.ones(n, n, device=K.device) / n
+
+                        HSIC_XY = torch.trace(torch.mm(torch.mm(K, H), torch.mm(L, H))) / ((n - 1) ** 2)
+                        HSIC_XX = torch.trace(torch.mm(torch.mm(K, H), torch.mm(K, H))) / ((n - 1) ** 2)
+                        HSIC_YY = torch.trace(torch.mm(torch.mm(L, H), torch.mm(L, H))) / ((n - 1) ** 2)
+
+                        # Compute CKA
+                        cka_val = HSIC_XY / torch.sqrt(HSIC_XX * HSIC_YY)
+                        return cka_val.item()
+
+                    for i in range(num_layers):
+                        for j in range(i, num_layers):
+                            # Detach tensors from the computation graph before CKA
+                            act_i = reshaped_activations[i].detach()
+                            act_j = reshaped_activations[j].detach()
+                            cka_val = compute_cka(act_i, act_j)
+                            cka_matrix[i, j] = cka_val
+                            cka_matrix[j, i] = cka_val
+
+                    plt.figure(figsize=(10, 8))
+                    plt.imshow(cka_matrix, origin='lower', cmap='magma')
+                    plt.xlabel("Layer Index")
+                    plt.ylabel("Layer Index")
+                    plt.title(f"DistilBERT Layer CKA Similarity at Global Step {global_step}")
+
+                    # Create proper labels for DistilBERT (embeddings + transformer layers)
+                    layer_labels = ['Embeddings'] + [f'Transformer-L{i+1}' for i in range(num_layers - 1)]
+                    plt.xticks(np.arange(num_layers), labels=layer_labels, rotation=45)
+                    plt.yticks(np.arange(num_layers), labels=layer_labels)
+                    
+                    plt.colorbar(label="CKA Similarity")
+                    plt.tight_layout()
+                    
+                    tb_writer.add_figure("CKA/matrix", plt.gcf(), global_step)
+                    plt.close()
 
                 # Save model checkpoint
                 if args.local_rank in [-1, 0] and args.save_steps > 0 and global_step % args.save_steps == 0:
