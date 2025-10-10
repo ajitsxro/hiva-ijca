@@ -526,7 +526,6 @@ class Transformer(nn.Module):
 
         print('forward')
         hidden_state = x
-        residuals = []  # <-- NEW: Store layer-wise residual deltas
 
         all_residual_diffs = []
         prev_h = hidden_state  # initial hidden state before first layer
@@ -536,7 +535,6 @@ class Transformer(nn.Module):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_state,)
 
-            prev_hidden = hidden_state  # Save current state before layer
             layer_outputs = layer_module(
                 hidden_state,
                 attn_mask,
@@ -545,20 +543,11 @@ class Transformer(nn.Module):
             )
             hidden_state = layer_outputs[-1]
 
-            # Calculate residual difference for MI calculation
             if i > 0:  # skip first layer since it has no previous hidden state
-                # Use previous hidden state stored from last iteration
                 residual_diff = hidden_state - prev_h
-                # Normalize residual difference to prevent extreme values
-                residual_diff = residual_diff / (torch.norm(residual_diff, dim=-1, keepdim=True) + 1e-8)
                 all_residual_diffs.append(residual_diff)
 
-            prev_h = hidden_state  # store current state for next iteration
-
-            # Store layer-wise residuals for potential other uses
-            layer_residual = hidden_state - prev_hidden
-            residuals.append(layer_residual)
-            print('residuals:', len(residuals))
+            prev_h = hidden_state  # store for next iteration
 
             if output_attentions:
                 # print('output attentions')
@@ -573,7 +562,6 @@ class Transformer(nn.Module):
         if output_hidden_states:
             # print('output hidden states')
             all_hidden_states = all_hidden_states + (hidden_state,)
-            self.residuals = residuals  # <-- NEW: Save residuals as class attribute
 
         print("Return_dict:", return_dict)
         if not return_dict:
@@ -589,10 +577,10 @@ class Transformer(nn.Module):
         # print('after output')
 
         # print('outputs:', outputs)
-        if all_residual_diffs:
-            print("residual_diffs 1:", all_residual_diffs[0].shape)
+        print("residual_diffs 1:", all_residual_diffs[0].shape)
         print('output length 2:', len(outputs))
 
+        # print(outputs.shape)
         return outputs
 
         '''
@@ -1010,10 +998,13 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         # self.club = CLUB(config.dim)
         self.distilbert = DistilBertModel(config)
         self.qa_outputs = nn.Linear(config.dim, config.num_labels)
-                # === CLUB Mutual Information Regularizer ===
+        # QA head for residuals - same structure as main QA head
+        self.residual_qa_outputs = nn.Linear(config.dim, config.num_labels)
+
+        # === CLUB Mutual Information Regularizer ===
         self.lambda_val = 0.1  # weighting factor for MI loss
         from .club import CLUBSample  # make sure CLUB repo is cloned into your project
-        self.club = CLUBSample(config.hidden_size, config.hidden_size, config.hidden_size)
+        self.club = CLUBSample(config.dim, config.dim, config.hidden_size)  # (B, hidden_dim) inputs for full hidden states
 
         if config.num_labels != 2:
             raise ValueError(f"config.num_labels should be 2, but it is {config.num_labels}")
@@ -1023,10 +1014,12 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+        import torch.nn.functional as f
+
     def get_position_embeddings(self) -> nn.Embedding:
         """
         Returns the position embeddings
-        """
+        """a=
         return self.distilbert.get_position_embeddings()
 
     def resize_position_embeddings(self, new_num_position_embeddings: int):
@@ -1064,7 +1057,7 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
+            output_hidden_states=True,  # Force True to get hidden states for MI calculation
             return_dict=True,  # force tuple output to unpack residuals
         )
         hidden_states = distilbert_output[0]
@@ -1105,72 +1098,65 @@ class DistilBertForQuestionAnswering(DistilBertPreTrainedModel):
             print('task_loss:', task_loss)
             print("task_loss.shape:", task_loss.shape)
 
-            # === CLUB MI Regularization ===
-            mi_loss = torch.tensor(0.0, device=task_loss.device, requires_grad=True)
-            
-            if distilbert_output["residual_diff"] is not None and len(distilbert_output["residual_diff"]) > 1:
-                residuals = distilbert_output["residual_diff"]
-                valid_mi_estimates = []
-                
-                for i in range(len(residuals) - 1):
-                    # Get consecutive residual differences
-                    x = residuals[i].mean(dim=1)  # [batch_size, hidden_dim]
-                    y = residuals[i+1].mean(dim=1)  # [batch_size, hidden_dim]
-                    
-                    print(f"Raw x stats: mean={x.mean().item():.4f}, std={x.std().item():.4f}")
-                    print(f"Raw y stats: mean={y.mean().item():.4f}, std={y.std().item():.4f}")
-                    
-                    # Light normalization - preserve more signal
-                    x_mean, x_std = x.mean(dim=0, keepdim=True), x.std(dim=0, keepdim=True) + 1e-6
-                    y_mean, y_std = y.mean(dim=0, keepdim=True), y.std(dim=0, keepdim=True) + 1e-6
-                    
-                    x_normalized = (x - x_mean) / x_std
-                    y_normalized = (y - y_mean) / y_std
-                    
-                    # Light clipping instead of heavy tanh squashing
-                    x_normalized = torch.clamp(x_normalized, min=-3.0, max=3.0)
-                    y_normalized = torch.clamp(y_normalized, min=-3.0, max=3.0)
-                    
-                    print(f"Normalized x stats: mean={x_normalized.mean().item():.4f}, std={x_normalized.std().item():.4f}")
-                    print(f"Normalized y stats: mean={y_normalized.mean().item():.4f}, std={y_normalized.std().item():.4f}")
-                    
-                    # Compute MI estimate with CLUB
-                    mi_estimate = self.club(x_normalized, y_normalized)
-                    
-                    print(f"Layer {i}->{i+1} raw MI estimate:", mi_estimate.item())
-                    
-                    # Only include reasonable MI estimates (filter out extreme values)
-                    if torch.isfinite(mi_estimate) and torch.abs(mi_estimate) < 100.0:  # Increased threshold
-                        valid_mi_estimates.append(mi_estimate)
-                        print(f"Layer {i}->{i+1} MI estimate (accepted):", mi_estimate.item())
-                    else:
-                        print(f"Layer {i}->{i+1} MI estimate (rejected): {mi_estimate.item()}")
-                
-                # Average valid MI estimates
-                if valid_mi_estimates:
-                    mi_loss = torch.stack(valid_mi_estimates).mean()
-                    print(f"Final averaged mi_loss: {mi_loss.item():.8f} (from {len(valid_mi_estimates)} estimates)")
-                else:
-                    print("No valid MI estimates, using zero MI loss")
+            # === CLUB MI Regularization using actual hidden states (matching CKA) ===
+            device = hidden_states.device
+            mi_loss = torch.tensor(0.0, device=device)
 
-            # === Combine Task Loss with MI Regularization ===
-            lambda_coeff = 1e-2  # Significantly increased for more visible effect
+            # Use hidden_states from distilbert output (same as CKA)
+            if distilbert_output.hidden_states is not None and len(distilbert_output.hidden_states) > 1:
+                all_hidden_states = distilbert_output.hidden_states
+
+                # Compute MI between consecutive layers
+                for i in range(len(all_hidden_states) - 1):
+                    # Get hidden states for layer i and i+1
+                    # Shape: (batch_size, seq_len, hidden_dim)
+                    h_i = all_hidden_states[i]
+                    h_j = all_hidden_states[i + 1]
+
+                    # Mean pool over sequence dimension to get (batch_size, hidden_dim)
+                    # This matches what CKA does: reshape to (batch*seq, dim) then compute similarity
+                    x = h_i.mean(dim=1)  # (batch_size, hidden_dim)
+                    y = h_j.mean(dim=1)  # (batch_size, hidden_dim)
+
+                    # Ensure on correct device
+                    x = x.to(device)
+                    y = y.to(device)
+
+                    # Compute MI estimate between consecutive layers
+                    mi_estimate = self.club(x, y)
+                    mi_loss += mi_estimate
+
+                    print(f"Layer {i}->{i+1} MI estimate: {mi_estimate.item():.6f}")
+
+                # Average over all consecutive pairs
+                if len(all_hidden_states) > 1:
+                    mi_loss = mi_loss / (len(all_hidden_states) - 1)
+                    print(f"Average mi_loss across layers: {mi_loss.item():.6f}")
+
+            else:
+                print("No hidden states available for MI calculation")
             
-            print(f"Raw mi_loss: {mi_loss.item():.8f}")
-            print(f"Abs mi_loss: {torch.abs(mi_loss).item():.8f}")
-            
-            # For MI regularization, we want to minimize MI, so subtract it from loss
-            # or take its absolute value and add it (both achieve regularization)
-            if torch.abs(mi_loss) > 1e-8:  # Lower threshold to catch smaller values
-                # Use absolute value to ensure we're always adding a positive regularization term
-                mi_reg_term = lambda_coeff * torch.abs(mi_loss)
-                total_loss = task_loss + mi_reg_term
-                print(f"Task loss: {task_loss.item():.6f}, MI reg term: {mi_reg_term.item():.6f}")
+
+
+            # === Combine QA loss with MI loss ===
+            lambda_coeff = 0.01  # Coefficient for MI regularization
+            if distilbert_output.hidden_states is not None and len(distilbert_output.hidden_states) > 1:
+                # Ensure mi_loss is on the same device as task_loss
+                mi_loss = mi_loss.to(task_loss.device)
+
+                # Clip MI loss to prevent explosion
+                mi_loss_clipped = torch.clamp(mi_loss, min=-10.0, max=10.0)
+
+                # Penalize deviation from 0: use squared MI (so both positive and negative are bad)
+                # This makes MI=0 the optimal point
+                mi_penalty = mi_loss_clipped ** 2
+
+                # Combine with task loss
+                total_loss = task_loss + (lambda_coeff * mi_penalty)
+                print(f"task_loss: {task_loss.item():.4f}, mi_loss_raw: {mi_loss.item():.4f}, mi_penalty: {mi_penalty.item():.4f}, total_loss: {total_loss.item():.4f}")
             else:
                 total_loss = task_loss
-                print("Using task loss only (no MI regularization - mi_loss too small)")
-            
-            print(f"Final total_loss: {total_loss.item():.6f}")
+                print(f"total_loss (no MI): {total_loss.item():.4f}")
 
         if not return_dict:
             output = (start_logits, end_logits, residual_diff) + distilbert_output[2:]
